@@ -13,6 +13,8 @@
 #include "tests/KernelTestCases.h"
 #include "gtest/gtest.h"
 #include "tests/PIMKernel.h"
+#include "tests/TestCases.h"
+
 
 /*
  * PIMKernelTest:
@@ -20,6 +22,15 @@
  */
 
 using namespace DRAMSim;
+
+TEST_F(HeterogenousMemoryFixture, space)
+{
+
+    divide_transaction();
+
+
+
+}
 
 TEST_F(PIMKernelFixture, gemv_tree)
 {

@@ -34,6 +34,91 @@ class basicFixture : public testing::Test
     virtual void TearDown() {}
 };
 
+class HeterogenousMemoryFixture: public testing::Test
+{
+    public:
+        HeterogenousMemoryFixture() {}
+        ~HeterogenousMemoryFixture() {}
+    virtual void SetUp() {}
+
+    void make_heterogenous_memory()
+    {
+        shared_ptr<MultiChannelMemorySystem> hbm_mem = make_shared<MultiChannelMemorySystem>(
+            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
+            256 * 64 * 2);
+
+        shared_ptr<MultiChannelMemorySystem> ddr4_mem = make_shared<MultiChannelMemorySystem>(
+            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
+            256 * 64 * 2);
+    }
+
+    void divide_transaction()
+    {
+        
+    }
+
+    void calculate_NMP()
+    {
+        
+    }
+
+    void run_embedding_operations()
+    {
+        bool is_write = false;
+        bool non_pipeline = true;
+        BurstType nullBst;
+        uint64_t addr = basic_stride;
+        int nmp_time = 0;
+
+
+        while (hbm_mem->hasPendingTransactions() || ddr4_mem->hasPendingTransactions())
+        {
+            divide_transaction();
+            hbm_mem->addTransaction(is_write, addr, &nullBst);
+            ddr4_mem->addTransaction(is_write, addr, &nullBst);
+
+            hbm_mem->update();
+            ddr4_mem->update();
+        }
+    }
+
+    void generateMemTraffic(bool is_write)
+    {
+        int num_trans = 0;
+        BurstType nullBst;
+
+        for (uint64_t i = 0; i < mem_size; ++i)
+        {
+            if (num_trans >= (data_size_in_byte / basic_stride))
+            {
+                break;
+            }
+            uint64_t addr = i * basic_stride;
+            hbm_mem->addTransaction(is_write, addr, &nullBst);
+            ddr4_mem->addTransaction(is_write, addr, &nullBst);
+            num_trans++;
+
+            while (hbm_mem->hasPendingTransactions())
+            {
+                cur_cycle++;
+                hbm_mem->update();
+            }
+
+        }
+    }
+
+    private:
+        shared_ptr<MultiChannelMemorySystem> hbm_mem;
+        shared_ptr<MultiChannelMemorySystem> ddr4_mem;
+        bool write_;
+        uint64_t cur_cycle = 0;
+        uint64_t mem_size;
+        uint64_t data_size_in_byte;
+        uint64_t basic_stride;
+};
+
+
+
 class MemBandwidthFixture : public testing::Test
 {
   public:
