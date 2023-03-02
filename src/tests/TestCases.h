@@ -22,6 +22,11 @@
 #include "FP16.h"
 #include "gtest/gtest.h"
 #include "tests/PIMKernel.h"
+#include "Callback.h"
+#include <stdint.h> 
+
+#include <fstream>
+#include <iostream>
 
 using namespace DRAMSim;
 
@@ -39,53 +44,229 @@ class HeterogenousMemoryFixture: public testing::Test
     public:
         HeterogenousMemoryFixture() {}
         ~HeterogenousMemoryFixture() {}
-    virtual void SetUp() {}
-
-    void make_heterogenous_memory()
+    virtual void SetUp() 
     {
-        shared_ptr<MultiChannelMemorySystem> hbm_mem = make_shared<MultiChannelMemorySystem>(
+        cur_cycle = 0;
+
+        hbm_callback = MyCallBack();
+        ddr4_callback = MyCallBack();
+
+
+        hbm_mem = make_shared<MultiChannelMemorySystem>(
+            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm.ini", ".", "example_app",
+            256 * 16);
+
+
+        ddr4_mem = make_shared<MultiChannelMemorySystem>(
             "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
             256 * 64 * 2);
 
-        shared_ptr<MultiChannelMemorySystem> ddr4_mem = make_shared<MultiChannelMemorySystem>(
-            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
-            256 * 64 * 2);
+        hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
+        ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
+
+        mem_size = (uint64_t)getConfigParam(UINT, "NUM_CHANS") * getConfigParam(UINT, "NUM_RANKS") *
+                   getConfigParam(UINT, "NUM_BANK_GROUPS") * getConfigParam(UINT, "NUM_BANKS") *
+                   getConfigParam(UINT, "NUM_ROWS") * getConfigParam(UINT, "NUM_COLS");
+
+        basic_stride =
+            (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
+
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/trace.txt");
+
     }
 
-    void divide_transaction()
+    class MyCallBack : public TransactionCompleteCB
     {
-        
+        public:
+            MyCallBack() 
+            {
+                complete_addr = 0;
+                complete_cycle = 0;
+            }
+
+            void operator()(unsigned id, uint64_t addr, uint64_t cycle)
+            {
+                complete_addr = addr;
+                complete_cycle = cycle;
+            }
+
+            uint64_t complete_addr;
+            uint64_t complete_cycle;
+
+    };
+
+    void setDataSize(unsigned size)
+    {
+        data_size_in_byte = size;
     }
 
-    void calculate_NMP()
+    void addTransactionPerPooling(int pooling_idx, int is_write, BurstType bst)
     {
-        
-    }
-
-    void run_embedding_operations()
-    {
-        bool is_write = false;
-        bool non_pipeline = true;
-        BurstType nullBst;
-        uint64_t addr = basic_stride;
-        int nmp_time = 0;
-
-
-        while (hbm_mem->hasPendingTransactions() || ddr4_mem->hasPendingTransactions())
+        for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
         {
-            divide_transaction();
-            hbm_mem->addTransaction(is_write, addr, &nullBst);
-            ddr4_mem->addTransaction(is_write, addr, &nullBst);
-
-            hbm_mem->update();
-            ddr4_mem->update();
+            hbm_mem->addTransaction(is_write, HBM_transaction[pooling_idx][j], &bst);
+        }
+        for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
+        {
+            ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k], &bst);
         }
     }
 
-    void generateMemTraffic(bool is_write)
+    void executeSpace()
+    {
+        bool is_write = false;
+        BurstType nullBst;
+        int add_cycle = 3;
+        int nmp_cycle_left = add_cycle;
+        bool is_calculating = false;
+
+        int target_addr = 0;
+        int nmp_tail_cycles = 0;
+        int pooling_count = 0;
+
+        int buffer_queue=0;
+        uint64_t last_addr = 0;
+
+        int total_embedding = HBM_transaction.size();
+
+        for(int i=0; i<total_embedding; i++)
+        {
+            pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
+            addTransactionPerPooling(i, is_write, nullBst);
+            uint64_t hbm_target_addr = HBM_transaction[i][0];
+            uint64_t ddr4_target_addr = DIMM_transaction[i][0];
+            int hbm_addr_idx = 0;
+            int ddr4_addr_idx = 0;
+
+            while (hbm_mem->hasPendingTransactions() || ddr4_mem->hasPendingTransactions())
+            {   
+                hbm_mem->update();
+                ddr4_mem->update();
+
+                if(is_calculating)
+                {
+                    nmp_cycle_left--;
+                    if(nmp_cycle_left == 0)
+                        is_calculating = false;
+                }
+
+                if (hbm_callback.complete_addr == hbm_target_addr)
+                {
+                    pooling_count -= 1;
+                    hbm_addr_idx++;
+                    hbm_target_addr = HBM_transaction[i][hbm_addr_idx];
+                    if(is_calculating)
+                        buffer_queue++;
+                    else
+                        is_calculating = true;
+                }
+                if (ddr4_callback.complete_addr == ddr4_target_addr)
+                {
+                    pooling_count -= 1;
+                    ddr4_addr_idx++;
+                    ddr4_target_addr = DIMM_transaction[i][ddr4_addr_idx];
+                    if(is_calculating)
+                        buffer_queue++;
+                    else
+                        is_calculating = true;
+
+                }
+                if (pooling_count == 0)
+                    nmp_tail_cycles += 3;
+
+                if (buffer_queue > 0)
+                {
+                    if(!is_calculating)
+                        nmp_cycle_left = add_cycle;
+                }
+                // cout << hbm_callback.complete_addr << endl;
+                // cout << hbm_callback.complete_cycle << endl;
+            }
+
+        }
+
+
+    }
+
+    void getMemTraffic(string filename)
+    {
+        string line, str_tmp;
+        std::ifstream file(filename);
+        std::stringstream ss;
+        int count = 0;
+
+        std::vector<uint64_t> inner1;
+        std::vector<uint64_t> inner2;
+        HBM_transaction.push_back(inner1);
+        DIMM_transaction.push_back(inner2);
+        HBM_transaction[count].clear();
+        DIMM_transaction[count].clear();
+        cout << filename << endl;
+
+        if(file.is_open())
+        {
+            while (std::getline(file, line, '\n'))
+            {
+                if(line.empty())
+                {
+                    count++;
+                    std::vector<uint64_t> inner1;
+                    std::vector<uint64_t> inner2;
+                    HBM_transaction.push_back(inner1);
+                    DIMM_transaction.push_back(inner2);
+                    HBM_transaction[count].clear();
+                    DIMM_transaction[count].clear();
+                    continue;
+                }
+
+                ss.str(line);
+                string mode = "DIMM";
+                uint64_t addr = 0;
+                int str_count = 0;
+
+                while (ss >> str_tmp)
+                {
+                    if(str_count == 0)
+                    {
+                        if(str_tmp == "\n")
+                            count++;
+                        else
+                            mode = str_tmp;
+                    }
+                    else
+                        addr = std::stoull(str_tmp);
+
+                    str_count++;
+                }
+
+                if(mode == "HBM")
+                    HBM_transaction[count].push_back(addr);
+                else
+                    DIMM_transaction[count].push_back(addr);
+
+                ss.clear();
+            }
+
+            // for(int i=0;i<HBM_transaction.size();i++)
+            // {
+            //     vector<uint64_t> trans = HBM_transaction[i];
+            //     for(int j=0;j<trans.size();j++)
+            //     {
+            //         cout << trans[j] << endl;
+            //     }
+            // }
+
+        }
+           
+    }
+
+    void generateDummyMemTraffic(bool is_write)
     {
         int num_trans = 0;
         BurstType nullBst;
+
+        cout << "test start" << endl;
+        cout << mem_size << endl;
 
         for (uint64_t i = 0; i < mem_size; ++i)
         {
@@ -93,18 +274,24 @@ class HeterogenousMemoryFixture: public testing::Test
             {
                 break;
             }
-            uint64_t addr = i * basic_stride;
-            hbm_mem->addTransaction(is_write, addr, &nullBst);
-            ddr4_mem->addTransaction(is_write, addr, &nullBst);
-            num_trans++;
 
-            while (hbm_mem->hasPendingTransactions())
-            {
-                cur_cycle++;
-                hbm_mem->update();
-            }
+            // uint64_t addr = i * basic_stride;
+            uint64_t addr = 0;
+            hbm_mem->addTransaction(is_write, addr, &nullBst);
+            hbm_mem->addTransaction(is_write, addr, &nullBst);
+            // ddr4_mem->addTransaction(is_write, addr, &nullBst);
+            num_trans++;
+        }
+
+        while (hbm_mem->hasPendingTransactions())
+        {
+            cur_cycle++;
+            hbm_mem->update();
+            // cout << hbm_callback.complete_addr << endl;
+            // cout << hbm_callback.complete_cycle << endl;
 
         }
+
     }
 
     private:
@@ -115,6 +302,13 @@ class HeterogenousMemoryFixture: public testing::Test
         uint64_t mem_size;
         uint64_t data_size_in_byte;
         uint64_t basic_stride;
+        MyCallBack hbm_callback;
+        MyCallBack ddr4_callback;
+
+        vector <vector<uint64_t>> HBM_transaction;
+        vector <vector<uint64_t>> DIMM_transaction;
+
+
 };
 
 
@@ -199,6 +393,7 @@ class MemBandwidthFixture : public testing::Test
                 break;
             }
             uint64_t addr = i * basic_stride;
+            // cout << addr << endl;
             mem->addTransaction(is_write, addr, &nullBst);
             num_trans++;
         }
