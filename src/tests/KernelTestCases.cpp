@@ -25,9 +25,7 @@ using namespace DRAMSim;
 
 TEST_F(HeterogenousMemoryFixture, space)
 {
-    // make_heterogenous_memory();
-    setDataSize(128 * 1024 * 64);  // in bytes
-    generateDummyMemTraffic(false);
+    executeSpace();
 }
 
 TEST_F(PIMKernelFixture, gemv_tree)

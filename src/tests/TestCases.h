@@ -27,6 +27,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 
 using namespace DRAMSim;
 
@@ -51,15 +52,12 @@ class HeterogenousMemoryFixture: public testing::Test
         hbm_callback = MyCallBack();
         ddr4_callback = MyCallBack();
 
-
         hbm_mem = make_shared<MultiChannelMemorySystem>(
-            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm.ini", ".", "example_app",
+            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_16ch.ini", ".", "example_app",
             256 * 16);
-
-
         ddr4_mem = make_shared<MultiChannelMemorySystem>(
-            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
-            256 * 64 * 2);
+            "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
+            8*1024);
 
         hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
         ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
@@ -80,25 +78,22 @@ class HeterogenousMemoryFixture: public testing::Test
         public:
             MyCallBack() 
             {
-                complete_addr = 0;
+                channel = 0;
                 complete_cycle = 0;
             }
 
             void operator()(unsigned id, uint64_t addr, uint64_t cycle)
             {
-                complete_addr = addr;
-                complete_cycle = cycle;
+                channel = id;
+                if (complete_cycle != cycle)
+                    complete_addr.clear();
+
             }
 
-            uint64_t complete_addr;
+            int channel;
+            vector<uint64_t> complete_addr;
             uint64_t complete_cycle;
-
     };
-
-    void setDataSize(unsigned size)
-    {
-        data_size_in_byte = size;
-    }
 
     void addTransactionPerPooling(int pooling_idx, int is_write, BurstType bst)
     {
@@ -116,32 +111,31 @@ class HeterogenousMemoryFixture: public testing::Test
     {
         bool is_write = false;
         BurstType nullBst;
-        int add_cycle = 3;
-        int nmp_cycle_left = add_cycle;
-        bool is_calculating = false;
-
-        int target_addr = 0;
-        int nmp_tail_cycles = 0;
-        int pooling_count = 0;
-
-        int buffer_queue=0;
-        uint64_t last_addr = 0;
-
         int total_embedding = HBM_transaction.size();
+        int add_cycle = 3;
+        int hbm_clk = 2;
+        int ddr4_clk = 4;
+        int ddr4_count = 0;
 
         for(int i=0; i<total_embedding; i++)
         {
-            pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
-            addTransactionPerPooling(i, is_write, nullBst);
-            uint64_t hbm_target_addr = HBM_transaction[i][0];
-            uint64_t ddr4_target_addr = DIMM_transaction[i][0];
-            int hbm_addr_idx = 0;
-            int ddr4_addr_idx = 0;
+            int pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
+            bool is_calculating = false;
+            int nmp_cycle_left = add_cycle;
+            int buffer_queue = 0;
+            int nmp_cycle = 0;
 
-            while (hbm_mem->hasPendingTransactions() || ddr4_mem->hasPendingTransactions())
+            addTransactionPerPooling(i, is_write, nullBst);
+            while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
             {   
+                nmp_cycle++;
                 hbm_mem->update();
-                ddr4_mem->update();
+                ddr4_count++;
+                if (ddr4_count == ddr4_clk/hbm_clk)
+                {
+                    ddr4_mem->update();
+                    ddr4_count = 0;
+                }
 
                 if(is_calculating)
                 {
@@ -150,42 +144,41 @@ class HeterogenousMemoryFixture: public testing::Test
                         is_calculating = false;
                 }
 
-                if (hbm_callback.complete_addr == hbm_target_addr)
+                if (buffer_queue > 0 && !is_calculating)
                 {
-                    pooling_count -= 1;
-                    hbm_addr_idx++;
-                    hbm_target_addr = HBM_transaction[i][hbm_addr_idx];
+                    buffer_queue--;
+                    is_calculating = true;
+                    nmp_cycle_left = add_cycle;
+                }
+                
+
+                for (int i=0; i<hbm_callback.complete_addr.size();i++)
+                {
+                    cout << "HBM " << hbm_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+
+                    pooling_count--;
                     if(is_calculating)
                         buffer_queue++;
                     else
                         is_calculating = true;
-                }
-                if (ddr4_callback.complete_addr == ddr4_target_addr)
-                {
-                    pooling_count -= 1;
-                    ddr4_addr_idx++;
-                    ddr4_target_addr = DIMM_transaction[i][ddr4_addr_idx];
-                    if(is_calculating)
-                        buffer_queue++;
-                    else
-                        is_calculating = true;
-
-                }
-                if (pooling_count == 0)
-                    nmp_tail_cycles += 3;
-
-                if (buffer_queue > 0)
-                {
-                    if(!is_calculating)
                         nmp_cycle_left = add_cycle;
                 }
-                // cout << hbm_callback.complete_addr << endl;
-                // cout << hbm_callback.complete_cycle << endl;
+                for (int i=0; i<ddr4_callback.complete_addr.size();i++)
+                {
+                    cout << "DIMM " << ddr4_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+
+                    pooling_count--;
+                    if(is_calculating)
+                        buffer_queue++;
+                    else
+                        is_calculating = true;
+                        nmp_cycle_left = add_cycle;
+                }
+
+                hbm_callback.complete_addr.clear();
+                ddr4_callback.complete_addr.clear();
             }
-
         }
-
-
     }
 
     void getMemTraffic(string filename)

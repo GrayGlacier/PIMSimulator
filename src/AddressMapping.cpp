@@ -52,11 +52,24 @@ AddrMapping::AddrMapping()
     colBitWidth = uLog2(getConfigParam(UINT, "NUM_COLS"));
     byteOffsetWidth = uLog2(getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") / 8);
     unsigned throw_away_bits = uLog2(transactionSize);
+    // cout << throw_away_bits << endl;
+    // cout << byteOffsetWidth << endl;
+
     colLowBitWidth = (throw_away_bits - byteOffsetWidth);
     colHighBitWidth = colBitWidth - colLowBitWidth;
     num_chans_ = getConfigParam(UINT, "NUM_CHANS");
     num_bank_per_bg_ = getConfigParam(UINT, "NUM_BANKS") / getConfigParam(UINT, "NUM_BANK_GROUPS");
     addressMappingScheme = PIMConfiguration::getAddressMappingScheme();
+
+    cout << "rankBitWidth : " << rankBitWidth << endl;
+    cout << "rowBitwidth : " << rowBitWidth << endl;
+    cout << "colHighBitWidth :" << colHighBitWidth << endl;
+    cout << "channelBitWidth : " << channelBitWidth << endl;
+    cout << "bankBitWidth : " << bankBitWidth << endl;
+    cout << "bankgroupBitWidth : " << bankgroupBitWidth << endl;
+    cout << "colLowBitWidth :" << colHighBitWidth << endl;
+    cout << "byteOffsetWidth : " << byteOffsetWidth << endl;
+
 }
 
 unsigned AddrMapping::bankgroupId(int bank)
@@ -187,6 +200,18 @@ void AddrMapping::addressMapping(uint64_t physicalAddress, unsigned& newTransact
         newTransactionBank = diffBitWidth(&physicalAddress, bankBitWidth - bankgroupBitWidth);
         newTransactionBank |= diffBitWidth(&physicalAddress, bankgroupBitWidth)
                               << bankgroupBitWidth;
+        newTransactionColumn = diffBitWidth(&physicalAddress, colHighBitWidth);
+        newTransactionRow = diffBitWidth(&physicalAddress, rowBitWidth);
+        newTransactionRank = diffBitWidth(&physicalAddress, rankBitWidth);
+    }
+
+    else if (addressMappingScheme == Scheme9)
+    {
+        // rank:row:col:chan:bg:bank
+        newTransactionBank = diffBitWidth(&physicalAddress, bankBitWidth - bankgroupBitWidth);
+        newTransactionBank |= diffBitWidth(&physicalAddress, bankgroupBitWidth)
+                              << bankgroupBitWidth;
+        newTransactionChan = diffBitWidth(&physicalAddress, channelBitWidth);
         newTransactionColumn = diffBitWidth(&physicalAddress, colHighBitWidth);
         newTransactionRow = diffBitWidth(&physicalAddress, rowBitWidth);
         newTransactionRank = diffBitWidth(&physicalAddress, rankBitWidth);

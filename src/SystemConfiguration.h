@@ -86,6 +86,7 @@ enum AddressMappingScheme
     Scheme6,
     Scheme7,
     Scheme8,
+    Scheme9,
 };
 
 // used in MemoryController and CommandQueue
@@ -393,6 +394,10 @@ class PIMConfiguration
         if (param == "Scheme8")
         {
             return Scheme8;
+        }
+        if (param == "Scheme9")
+        {
+            return Scheme9;
         }
         throw invalid_argument("Invalid address mapping scheme");
     }

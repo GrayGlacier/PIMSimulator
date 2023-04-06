@@ -558,7 +558,7 @@ void MemoryController::update()
                 // memcpy(pendingReadTransactions[i]->data,
                 // returnTransaction[0]->data, config.BL * (JEDEC_DATA_BUS_BITS / 8));
                 returnReadData(pendingReadTransactions[i]);
-
+                //cout << returnTransaction[0]->address << endl;
                 delete pendingReadTransactions[i];
                 pendingReadTransactions.erase(pendingReadTransactions.begin() + i);
                 foundMatch = true;
