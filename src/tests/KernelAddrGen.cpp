@@ -47,6 +47,27 @@ uint64_t PIMAddrManager::addrGen(unsigned chan, unsigned rank, unsigned bankgrou
 
         addr <<= num_offset_bits_;
     }
+    else if (address_mapping_scheme_ == Scheme9)
+    {
+        addr = rank;
+
+        addr <<= num_row_bits_;
+        addr |= row;
+
+        addr <<= num_col_bits_;
+        addr |= col;
+
+        addr <<= num_chan_bits_;
+        addr |= chan;
+
+        addr <<= num_bankgroup_bits_;
+        addr |= bankgroup;
+
+        addr <<= num_bank_bits_;
+        addr |= bank;
+
+        addr <<= num_offset_bits_;
+    }
     else
     {
         cerr << "Fatal: Not supported address scheme for PIM controller" << endl;

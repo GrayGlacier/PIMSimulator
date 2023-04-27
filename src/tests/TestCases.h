@@ -22,6 +22,7 @@
 #include "FP16.h"
 #include "gtest/gtest.h"
 #include "tests/PIMKernel.h"
+#include "tests/PIMKernelChannelwise.h"
 #include "Callback.h"
 #include <stdint.h> 
 
