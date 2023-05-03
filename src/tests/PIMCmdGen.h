@@ -73,19 +73,34 @@ class BatchNormPIMKernel : public IPIMCmd
 class EmbOpPIMKernel : public IPIMCmd
 {
     public:
-        EmbOpPIMKernel(KernelType ktype) : IPIMCmd(ktype) {}
+        EmbOpPIMKernel(KernelType ktype, int bank_id) : IPIMCmd(ktype), bank_id(bank_id) {}
     virtual vector<PIMCmd> generateKernel(int num_jump_to_be_taken,
                                           int num_jump_to_be_taken_odd_bank = 0,
                                           int num_jump_to_be_taken_even_bank = 0) override
     {
         vector<PIMCmd> pim_cmds;
+        vector<PIMCmd> tmp_cmds;
         PIMCmdType pimType = getPIMCmdType();
-        vector<PIMCmd> tmp_cmds{
-            PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::SRF_A),
-            PIMCmd(pimType, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK, 1),
-            PIMCmd(PIMCmdType::NOP, 7),
-            PIMCmd(PIMCmdType::NOP, 0),
-        };
+
+        if(bank_id == 0)
+        {
+            tmp_cmds = {
+                PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::SRF_A),
+                PIMCmd(pimType, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK, 1),
+                PIMCmd(PIMCmdType::NOP, 7),
+                PIMCmd(PIMCmdType::NOP, 0),
+            };
+        }
+        else
+        {
+            tmp_cmds = {
+                PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_B, PIMOpdType::SRF_A),
+                PIMCmd(pimType, PIMOpdType::GRF_B, PIMOpdType::GRF_B, PIMOpdType::ODD_BANK, 1),
+                PIMCmd(PIMCmdType::NOP, 7),
+                PIMCmd(PIMCmdType::NOP, 0),
+            };
+
+        }
         pim_cmds.assign(tmp_cmds.begin(), tmp_cmds.end());
         if (num_jump_to_be_taken != 0)
         {
@@ -103,6 +118,7 @@ class EmbOpPIMKernel : public IPIMCmd
         else
             throw invalid_argument("Not supported element-wise operation");
     }
+    int bank_id;
 };
 
 class EltwisePIMKernel : public IPIMCmd
@@ -232,7 +248,7 @@ class GemvPIMKernel : public IPIMCmd
 class PIMCmdGen
 {
   public:
-    static vector<PIMCmd> getPIMCmds(KernelType ktype, int num_jump_to_be_taken,
+    static vector<PIMCmd> getPIMCmds(KernelType ktype, int bank_id, int num_jump_to_be_taken,
                                      int num_jump_to_be_taken_odd_bank,
                                      int num_jump_to_be_taken_even_bank);
 };

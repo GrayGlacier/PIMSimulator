@@ -321,29 +321,24 @@ void PIMKernelChannelwise::readResult(BurstType* resultBst, pimBankType pb_type,
     }
 }
 
-void PIMKernelChannelwise::readPIMResult(BurstType* resultBst, int ch_idx, int ra_idx, int bg_idx, int bank_idx,
-                           int bank_offset, unsigned starting_row, unsigned starting_col, uint64_t base_addr)
+uint64_t PIMKernelChannelwise::readPIMResult(int ch_idx, int ra_idx, int bg_idx, int bank_idx, unsigned row, unsigned col)
 {
-//   int bank_offset = (int)pb_type % 2;
-    uint64_t addr;
-    unsigned row = starting_row;
-    unsigned col = starting_col;
+    uint64_t addr = pim_addr_mgr_->addrGenSafe(ch_idx, ra_idx, bg_idx, bank_idx, row, col);
+    mem_->addTransaction(false, addr, "output", &null_bst_);
 
-    addr = pim_addr_mgr_->addrGenSafe(ch_idx, ra_idx, bg_idx, bank_idx + bank_offset, row,
-                                        col);
-    mem_->addTransaction(false, base_addr + addr, "output", &resultBst[0]);
+    return addr;
 }
 
 
 void PIMKernelChannelwise::executeEltwise(int dim, pimBankType pb_type, KernelType ktype, int ch_idx, int ra_idx,
-                                int input0_row, int result_row, int input1_row)
+                                 int bank_idx, int input_row, int result_row)
 {
     // TODO : num_jump_to_be_taken??
     // how many num_tiles are needed? (dim / num_grf ?? -> dim : byte, num_grf : byte (fp 16) -> how many bytes?)
     // need to consider dim with burst byte and precision byte
     int num_tile = 8;
     int num_jump_to_be_taken = num_tile - 1;
-    vector<PIMCmd> pim_cmds = PIMCmdGen::getPIMCmds(ktype, num_jump_to_be_taken, 0, 0);
+    vector<PIMCmd> pim_cmds = PIMCmdGen::getPIMCmds(ktype, bank_idx, num_jump_to_be_taken, 0, 0);
 
     int crf_toggle_cond = -1;
     // set Toggle Condition
@@ -372,31 +367,23 @@ void PIMKernelChannelwise::executeEltwise(int dim, pimBankType pb_type, KernelTy
     changePIMMode(dramMode::HAB, dramMode::HAB_PIM, ch_idx, ra_idx);
 
     if (ktype == KernelType::EMB)
-        computeAddOrMul(num_tile, ch_idx, ra_idx, input0_row, result_row, input1_row);
-    /*
-       else if (ktype == KernelType::BN)
-       computeBn(num_tile, input0_row, result_row);
-     */
+        computeEmbOp(num_tile, ch_idx, ra_idx, bank_idx, input_row, result_row);
 
     changePIMMode(dramMode::HAB_PIM, dramMode::HAB, ch_idx, ra_idx);
     changePIMMode(dramMode::HAB, dramMode::SB, ch_idx, ra_idx);
     parkOut(ch_idx, ra_idx);
 }
 
-void PIMKernelChannelwise::computeAddOrMul(int num_tile, int ch_idx, int ra_idx, int input0_row, int result_row, int input1_row)
+void PIMKernelChannelwise::computeEmbOp(int num_tile, int ch_idx, int ra_idx, int bank_idx, int input_row, int result_row)
 {
+    int bank_parity = bank_idx % 2;
     for (int i = 0; i < num_tile; i++)
     {
         int c = num_grf_ * i;
-        for (int b = 0; b < 2; b++)  // for even/odd banks, respectively
-        {
-            addTransactionAll(false, ch_idx, ra_idx, 0, b, input0_row, c, "BANK_TO_GRF_", &null_bst_, true,
-                              num_grf_);
-            addTransactionAll(false, ch_idx, ra_idx, 0, b, input1_row, c, "ADD", &null_bst_, true, num_grf_);
-            addTransactionAll(true, ch_idx, ra_idx, 0, b, result_row, c, "GRF_TO_BANK", &null_bst_, true, num_grf_);
-        }
-        //addTransactionAll(true, ch_idx, ra_idx, 0, 1, result_row, c + num_grf_ - 1, "GRF_TO_BANK_DUMMY", &null_bst_,
-//                          true, 1);
+        addTransactionAll(false, ch_idx, ra_idx, 0, bank_parity, 0, 0, "SRF_TO_GRF", &null_bst_, true,
+                            num_grf_);
+        addTransactionAll(false, ch_idx, ra_idx, 0, bank_parity, input_row, c, "BANK_TO_GRF_AND_ADD", &null_bst_, true, num_grf_);
+        addTransactionAll(true, ch_idx, ra_idx, 0, bank_parity, result_row, c, "GRF_TO_BANK", &null_bst_, true, num_grf_);
     }
 }
 

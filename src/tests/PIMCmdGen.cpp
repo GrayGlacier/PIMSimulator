@@ -14,7 +14,7 @@
 
 #include <memory>
 
-vector<PIMCmd> PIMCmdGen::getPIMCmds(KernelType ktype, int num_jump_to_be_taken,
+vector<PIMCmd> PIMCmdGen::getPIMCmds(KernelType ktype, int bank_id, int num_jump_to_be_taken,
                                      int num_jump_to_be_taken_odd_bank,
                                      int num_jump_to_be_taken_even_bank)
 {
@@ -42,7 +42,7 @@ vector<PIMCmd> PIMCmdGen::getPIMCmds(KernelType ktype, int num_jump_to_be_taken,
             pim_kernel = make_unique<GemvPIMKernel>(ktype);
             break;
         case KernelType::EMB:
-            pim_kernel = make_unique<EmbOpPIMKernel>(ktype);
+            pim_kernel = make_unique<EmbOpPIMKernel>(ktype, bank_id);
             break;
         default:
             throw invalid_argument("Invalid kernel type");

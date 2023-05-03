@@ -98,17 +98,16 @@ class PIMKernelChannelwise
     */
     void executeGemv(NumpyBurstType* w_data, NumpyBurstType* i_data, bool is_tree);
     void executeEltwise(int dim, pimBankType bank_types, KernelType ktype, int ch_idx, int ra_idx,
-                        int input0_row, int result_row, int input1_row = 0);
+                        int bank_idx, int input_row, int result_row);
     void computeGemv(NumpyBurstType* data, int num_input_tiles, int num_output_tile, int input_tile,
                      int output_tile, int batch_idx, pimBankType bank_types);
-    void computeAddOrMul(int numTile, int ch_idx, int ra_idx, int input0Row, int resultRow, int input1Row);
+    void computeEmbOp(int numTile, int ch_idx, int ra_idx, int bank_idx, int input_Row, int result_Row);
     void computeRelu(int numTile, int input0Row, int resultRow);
     // void computeBn(int numTile, int input0Row, int resultRow);
 
     void readResult(BurstType* resultBst, pimBankType bank_types, int output_dim,
                     uint64_t baseAddr = 0, unsigned startingRow = 0, unsigned startingCol = 0);
-    void readPIMResult(BurstType* resultBst, int ch_idx, int ra_idx, int bg_idx, int bank_idx,
-                           int bank_offset, unsigned starting_row = 0, unsigned starting_col = 0, uint64_t base_addr = 0);
+    uint64_t readPIMResult(int ch_idx, int ra_idx, int bg_idx, int bank_idx, unsigned row, unsigned col);
     void readData(BurstType* bst_data, size_t bst_cnt, unsigned s_row = 0, unsigned s_col = 0);
     void adderTree(BurstType* result, int output_dim, int numTile, int step, fp16* temp);
 

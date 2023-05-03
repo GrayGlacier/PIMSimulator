@@ -136,12 +136,6 @@ class MyPIMFixture : public testing::Test
             "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
             8*1024);
 
-        int numPIMChan = 64;
-        int numPIMRank = 1;
-        kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
-        ktype = KernelType::EMB;
-        vec_size_in_byte = 64;
-
         hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
         ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
 
@@ -152,52 +146,36 @@ class MyPIMFixture : public testing::Test
         basic_stride =
             (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
 
+        int numPIMChan = 64;
+        int numPIMRank = 1;
+        vec_size_in_byte = 64;
+
+        kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
+        ktype = KernelType::EMB;
+
         getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/pim_trace.txt");        
     }
-    void executePIMPerQemb(int pooling_idx, int ch_idx, int ra_idx)
+    void executePIMPerQemb(int pooling_idx, int ch_idx, int ra_idx, int bg_idx, int bank_idx, int row_idx, int col_idx)
     {
-        int dim = 64;
-        int input_row0 = 0;
-        int input_row1 = 128;
+        int input_row = row_idx;
         int result_row = 256;
+        kernel->executeEltwise(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, bank_idx, input_row, result_row);
+        uint64_t addr = kernel->readPIMResult(ch_idx, ra_idx, bg_idx, bank_idx, row_idx, col_idx); //TODO : put parameters
 
-        // TODO channel idx 파악 및 연결 - 완료
-        // if different channel -> 독립적으로 command 가능
-        // if same channel -> PIM이 끝날 때마다 넣어줘야 함. 어차피 eltwise에 parkout()까지 있으니 연속적으로 다 넣어줘도?
-        // 오늘 TODO : chan, rank 판별, Memory cmd generate, callback 함수 등록
-        // 내일 TODO : 디버깅,  input row 및 BG별로 어떻게 다르게 동작시킬지, 다르게 동작시키기 위해 무엇을 수정해야 하는지
-        kernel->executeEltwise(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, input_row0, result_row, input_row1);
+        HBM_read_addrs.push_back(addr);
     }
 
-    int addTransactionPerPooling_HBM(int pooling_idx, bool is_write, int last_trans_idx, BurstType bst)
+    int addTransactionPerPooling(int pooling_idx, bool is_write, BurstType bst)
     {
-        unsigned last_chan = -1;
-        int breakpoint_idx = 0;
-        for(int j=last_trans_idx;j<HBM_transaction[pooling_idx].size();j++)
+        for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
         {
             uint64_t addr = HBM_transaction[pooling_idx][j];
             unsigned chan, rank, bank, row, col;
             kernel->getChanRankBankgroupAddress(addr, chan, rank, bank, row, col);
             executePIMPerQemb(pooling_idx, chan, rank);
-            
-
-/*          // assume r vector is fetched from SRF
-
-            if(chan != last_chan)
-                executePIMPerQemb(pooling_idx, chan, rank);
-            else
-            {
-                breakpoint_idx = j;
-                break;
-            }
-*/
+            // assume r vector is fetched from SRF
         }
 
-        return breakpoint_idx;
-    }
-
-    void addTransactionPerPooling_DIMM(int pooling_idx, bool is_write, BurstType bst)
-    {
         for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
         {
             ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k], &bst);
@@ -222,10 +200,7 @@ class MyPIMFixture : public testing::Test
             int buffer_queue = 0;
             int nmp_cycle = 0;
 
-            int hbm_start_idx = 0;
-
-            hbm_start_idx = addTransactionPerPooling_HBM(hbm_start_idx, is_write, hbm_start_idx, nullBst);
-            addTransactionPerPooling_DIMM(i, is_write, nullBst);
+            addTransactionPerPooling(i, is_write, nullBst);
             while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
             {   
                 nmp_cycle++;
@@ -250,18 +225,24 @@ class MyPIMFixture : public testing::Test
                     is_calculating = true;
                     nmp_cycle_left = add_cycle;
                 }
-                
 
-                for (int i=0; i<hbm_callback.complete_addr.size();i++)
+
+                for (int i=0; i < hbm_callback.complete_addr.size();i++)
                 {
                     cout << "HBM " << hbm_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
-
-                    pooling_count--;
-                    if(is_calculating)
-                        buffer_queue++;
-                    else
-                        is_calculating = true;
-                        nmp_cycle_left = add_cycle;
+                    
+                    for(int j=0; j< HBM_read_addrs.size(); j++)
+                    {
+                        if(hbm_callback.complete_addr[i] == HBM_read_addrs[j])
+                        {
+                            pooling_count--; // r vector is added inside executePIMPerQemb
+                            if(is_calculating)
+                                buffer_queue++;
+                            else
+                                is_calculating = true;
+                                nmp_cycle_left = add_cycle;
+                        }
+                    }
                 }
                 for (int i=0; i<ddr4_callback.complete_addr.size();i++)
                 {
@@ -362,6 +343,7 @@ class MyPIMFixture : public testing::Test
 
         vector <vector<uint64_t>> HBM_transaction;
         vector <vector<uint64_t>> DIMM_transaction;
+        vector <uint64_t> HBM_read_addrs;
 
 };
 
