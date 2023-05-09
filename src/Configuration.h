@@ -33,6 +33,7 @@ class Configuration
         EPOCH_LENGTH = getConfigParam(UINT, "EPOCH_LENGTH");
         HISTOGRAM_BIN_SIZE = getConfigParam(UINT, "HISTOGRAM_BIN_SIZE");
         JEDEC_DATA_BUS_BITS = getConfigParam(UINT, "JEDEC_DATA_BUS_BITS");
+        SB_PIM = getConfigParam(BOOL, "SB_PIM");
         NUM_BANKS = getConfigParam(UINT, "NUM_BANKS");
         NUM_COLS = getConfigParam(UINT, "NUM_COLS");
         NUM_CHANS = getConfigParam(UINT, "NUM_CHANS");
@@ -160,6 +161,7 @@ class Configuration
     unsigned TRANS_QUEUE_DEPTH;
     unsigned WL;
     unsigned XAW;
+    bool SB_PIM;
 
     PIMMode PIM_MODE;
     PIMPrecision PIM_PRECISION;

@@ -28,6 +28,11 @@ TEST_F(HeterogenousMemoryFixture, space)
     executeSpace();
 }
 
+TEST_F(MyPIMFixture, allbankpim)
+{
+    executeNMP();
+}
+
 TEST_F(PIMKernelFixture, gemv_tree)
 {
     shared_ptr<PIMKernel> kernel = make_pim_kernel();

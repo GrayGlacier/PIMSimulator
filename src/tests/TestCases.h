@@ -86,6 +86,7 @@ class HeterogenousMemoryFixture: public testing::Test
             void operator()(unsigned id, uint64_t addr, uint64_t cycle)
             {
                 channel = id;
+                complete_addr.push_back(addr);
                 if (complete_cycle != cycle)
                     complete_addr.clear();
 
@@ -180,19 +181,22 @@ class HeterogenousMemoryFixture: public testing::Test
                 ddr4_callback.complete_addr.clear();
             }
         }
+
+        cout << cur_cycle << endl;
     }
 
     void getMemTraffic(string filename)
     {
+        cout << "generating transactions" << endl;
         string line, str_tmp;
         std::ifstream file(filename);
         std::stringstream ss;
         int count = 0;
 
-        std::vector<uint64_t> inner1;
-        std::vector<uint64_t> inner2;
-        HBM_transaction.push_back(inner1);
-        DIMM_transaction.push_back(inner2);
+        std::vector<uint64_t> HBM_pooling;
+        std::vector<uint64_t> DIMM_pooling;
+        HBM_transaction.push_back(HBM_pooling);
+        DIMM_transaction.push_back(DIMM_pooling);
         HBM_transaction[count].clear();
         DIMM_transaction[count].clear();
         cout << filename << endl;
@@ -204,10 +208,10 @@ class HeterogenousMemoryFixture: public testing::Test
                 if(line.empty())
                 {
                     count++;
-                    std::vector<uint64_t> inner1;
-                    std::vector<uint64_t> inner2;
-                    HBM_transaction.push_back(inner1);
-                    DIMM_transaction.push_back(inner2);
+                    std::vector<uint64_t> HBM_pooling;
+                    std::vector<uint64_t> DIMM_pooling;
+                    HBM_transaction.push_back(HBM_pooling);
+                    DIMM_transaction.push_back(DIMM_pooling);
                     HBM_transaction[count].clear();
                     DIMM_transaction[count].clear();
                     continue;
@@ -240,15 +244,6 @@ class HeterogenousMemoryFixture: public testing::Test
 
                 ss.clear();
             }
-
-            // for(int i=0;i<HBM_transaction.size();i++)
-            // {
-            //     vector<uint64_t> trans = HBM_transaction[i];
-            //     for(int j=0;j<trans.size();j++)
-            //     {
-            //         cout << trans[j] << endl;
-            //     }
-            // }
 
         }
            

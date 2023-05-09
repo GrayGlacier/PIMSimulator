@@ -51,7 +51,11 @@ enum class PIMOpdType
     GRF_A,
     GRF_B,
     SRF_M,
-    SRF_A
+    SRF_A,
+    FIRST_BANK,
+    SECOND_BANK,
+    THIRD_BANK,
+    FOURTH_BANK
 };
 
 class PIMCmd
@@ -192,6 +196,14 @@ class PIMCmd
                 return "EVEN_BANK";
             case PIMOpdType::ODD_BANK:
                 return "ODD_BANK";
+            case PIMOpdType::FIRST_BANK:
+                return "FIRST_BANK";
+            case PIMOpdType::SECOND_BANK:
+                return "SECOND_BANK";
+            case PIMOpdType::THIRD_BANK:
+                return "THIRD_BANK";
+            case PIMOpdType::FOURTH_BANK:
+                return "FOURTH_BANK";
             case PIMOpdType::GRF_A:
                 return "GRF_A[" + to_string(idx) + "]";
             case PIMOpdType::GRF_B:

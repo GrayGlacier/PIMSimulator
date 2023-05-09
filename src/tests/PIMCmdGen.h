@@ -115,6 +115,8 @@ class EmbOpPIMKernel : public IPIMCmd
     {
         if (kernelType == KernelType::ADD)
             return PIMCmdType::ADD;
+        else if (kernelType == KernelType::EMB)
+            return PIMCmdType::ADD;
         else
             throw invalid_argument("Not supported element-wise operation");
     }
@@ -248,6 +250,9 @@ class GemvPIMKernel : public IPIMCmd
 class PIMCmdGen
 {
   public:
+    static vector<PIMCmd> getPIMCmds(KernelType ktype, int num_jump_to_be_taken,
+                                     int num_jump_to_be_taken_odd_bank,
+                                     int num_jump_to_be_taken_even_bank);
     static vector<PIMCmd> getPIMCmds(KernelType ktype, int bank_id, int num_jump_to_be_taken,
                                      int num_jump_to_be_taken_odd_bank,
                                      int num_jump_to_be_taken_even_bank);

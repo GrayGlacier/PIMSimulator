@@ -284,6 +284,31 @@ void PIMRank::readOpd(int pb, BurstType& bst, PIMOpdType type, BusPacket* packet
             rank->banks[pb * 2 + 1].read(packet);  // basically read from bank.
             bst = *(packet->data);
             return;
+        case PIMOpdType::FIRST_BANK:
+            if (packet->bank % 4 != 0)
+                PRINT("Warning, CRF bank coding and bank id from packet are inconsistent");
+            // 4 because 4 banks per single bankgroup
+            rank->banks[pb * 4].read(packet);  // basically read from bank.
+            bst = *(packet->data);
+            return;
+        case PIMOpdType::SECOND_BANK:
+            if (packet->bank % 4 != 1)
+                PRINT("Warning, CRF bank coding and bank id from packet are inconsistent");
+            rank->banks[pb * 4 + 1].read(packet);  // basically read from bank.
+            bst = *(packet->data);
+            return;
+        case PIMOpdType::THIRD_BANK:
+            if (packet->bank % 4 != 2)
+                PRINT("Warning, CRF bank coding and bank id from packet are inconsistent");
+            rank->banks[pb * 4 + 2].read(packet);  // basically read from bank.
+            bst = *(packet->data);
+            return;
+        case PIMOpdType::FOURTH_BANK:
+            if (packet->bank % 4 != 3)
+                PRINT("Warning, CRF bank coding and bank id from packet are inconsistent");
+            rank->banks[pb * 4 + 3].read(packet);  // basically read from bank.
+            bst = *(packet->data);
+            return;
         case PIMOpdType::GRF_A:
             if (is_auto)
                 bst = pimBlocks[pb].grfA[(is_mac) ? getGrfIdxHigh(packet->row, packet->column)
@@ -427,21 +452,39 @@ void PIMRank::doPIM(BusPacket* packet)
                     lastRepeatIdx_ = -1;
             }
 
-            for (int pimblock_id = 0; pimblock_id < config.NUM_PIM_BLOCKS; pimblock_id++)
+            if (config.SB_PIM)
             {
-                if (DEBUG_PIM_BLOCK && pimblock_id == 0)
+                // get bg id from packet and activate target bankgroup PIM
+                int bg_id = config.addrMapping.bankgroupId(packet->bank);
+                int pimblock_id = bg_id;
+
+                if (DEBUG_PIM_BLOCK)
                 {
                     PRINT(pimBlocks[pimblock_id].print());
                     PRINT("[BANK_R]" << packet->data->binToStr());
                     PRINT("[CMD]" << bitset<32>(cCmd.toInt()) << "(" << cCmd.toStr() << ")");
                 }
-
                 doPIMBlock(packet, cCmd, pimblock_id);
 
-                if (DEBUG_PIM_BLOCK && pimblock_id == 0)
+            }
+            else
+            {
+                for (int pimblock_id = 0; pimblock_id < config.NUM_PIM_BLOCKS; pimblock_id++)
                 {
-                    PRINT(pimBlocks[pimblock_id].print());
-                    PRINT("----------");
+                    if (DEBUG_PIM_BLOCK && pimblock_id == 0)
+                    {
+                        PRINT(pimBlocks[pimblock_id].print());
+                        PRINT("[BANK_R]" << packet->data->binToStr());
+                        PRINT("[CMD]" << bitset<32>(cCmd.toInt()) << "(" << cCmd.toStr() << ")");
+                    }
+
+                    doPIMBlock(packet, cCmd, pimblock_id);
+
+                    if (DEBUG_PIM_BLOCK && pimblock_id == 0)
+                    {
+                        PRINT(pimBlocks[pimblock_id].print());
+                        PRINT("----------");
+                    }
                 }
             }
         }

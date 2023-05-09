@@ -87,11 +87,12 @@ void PIMKernelChannelwise::addTransactionWithRawAddress(bool is_write, uint64_t 
         addBarrier(ch_idx);
 }
 
-void PIMKernelChannelwise::getChanRankBankgroupAddress(uint64_t addr, unsigned& chan, unsigned& rank, unsigned& bank, 
-                                                        unsigned& row, unsigned& col)
+void PIMKernelChannelwise::getChanRankBankgroupAddress(uint64_t addr, unsigned& chan, unsigned& rank, unsigned& bg,
+                                                        unsigned& bank, unsigned& row, unsigned& col)
 {
     AddrMapping addrmap;
     addrmap.addressMapping(addr, chan, rank, bank, row, col);
+    bg = addrmap.bankgroupId(bank);
 }
 
 void PIMKernelChannelwise::addTransactionAll(bool is_write, int ch_idx, int ra_idx, int bg_idx, int bank_idx, 
@@ -376,6 +377,8 @@ void PIMKernelChannelwise::executeEltwise(int dim, pimBankType pb_type, KernelTy
 
 void PIMKernelChannelwise::computeEmbOp(int num_tile, int ch_idx, int ra_idx, int bank_idx, int input_row, int result_row)
 {
+
+    // assume r vector is fetched from SRF
     int bank_parity = bank_idx % 2;
     for (int i = 0; i < num_tile; i++)
     {

@@ -74,7 +74,7 @@ class PIMKernelChannelwise
     void addTransactionAll(bool isWrite, int ch_idx, int ra_idx, int bg, int bank, 
                             int row, int col, BurstType* bst, bool use_barrier = false, int num_loop = 1);
     void addTransactionWithRawAddress(bool is_write, uint64_t addr, int ch_idx, bool use_barrier, BurstType* bst);
-    void getChanRankBankgroupAddress(uint64_t addr, unsigned& chan, unsigned& rank, unsigned& bank, unsigned& row, unsigned& col);
+    void getChanRankBankgroupAddress(uint64_t addr, unsigned& chan, unsigned& rank, unsigned& bg, unsigned& bank, unsigned& row, unsigned& col);
     /*
     void preprocessBn(NumpyBurstType* mean_npbst, NumpyBurstType* var_npbst,
                       NumpyBurstType* gamma_npbst, NumpyBurstType* beta_npbst,

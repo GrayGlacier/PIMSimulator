@@ -98,23 +98,72 @@ TestStats testStats;
 class MyCallBack : public TransactionCompleteCB
 {
     public:
-        MyCallBack() 
+        MyCallBack()
         {
             channel = 0;
+            complete_addr_count = 0;
             complete_cycle = 0;
         }
 
         void operator()(unsigned id, uint64_t addr, uint64_t cycle)
         {
             channel = id;
-            if (complete_cycle != cycle)
-                complete_addr.clear();
+            vector<int> erase_queue;
+            if(addr == 7569187264)
+                cout << "target addr found, cycle : " << cycle << endl;
 
+            for(int i=0; i<read_addr_list.size(); i++)
+            {
+//                if(addr == 7569187264)
+//                    cout << "target addr found, cycle : " << cycle << endl;
+
+//                if(read_addr_list[i] == 7569187264)
+//                    cout << "addr found at : " << i << ", cycle : " << cycle << endl;
+
+                if(addr == read_addr_list[i])
+                {
+                    // cout << read_addr_list.size() << endl;
+                    // cout << "read addr : "<< addr << endl;
+                    complete_channel.push_back(id);
+                    complete_addr.push_back(addr);
+                    erase_queue.push_back(i);
+                    complete_addr_count++;
+                    complete_cycle = cycle;
+                }                       
+            }
+
+            int erase_count = 0;
+            for(int i=0; i<erase_queue.size(); i++)
+            {
+                // cout << "erase addr : " << read_addr_list[erase_queue[i] - erase_count] << " " << erase_count << endl;
+                read_addr_list.erase(read_addr_list.begin() + erase_queue[i] - erase_count);
+                erase_count++;
+            }
+
+            if (read_addr_list.size() == 0)
+                cout << read_addr_list.size() << " " << cycle << endl;
+        }
+
+        void register_read_addr(uint64_t addr)
+        {
+            read_addr_list.push_back(addr);
+        }
+
+        void complete_addr_check_complete()
+        {
+            complete_addr.clear();
+            complete_channel.clear();
+            complete_addr_count = 0;
         }
 
         int channel;
-        vector<uint64_t> complete_addr;
+        int complete_addr_count;
+        bool scan_complete;
         uint64_t complete_cycle;
+        vector<bool> complete_index;
+        vector<uint64_t> read_addr_list;
+        vector<uint64_t> complete_channel;
+        vector<uint64_t> complete_addr;
 };
 
 class MyPIMFixture : public testing::Test
@@ -124,20 +173,13 @@ class MyPIMFixture : public testing::Test
         ~MyPIMFixture() {}
     virtual void SetUp()
     {
-        cur_cycle = 0;
-
-        hbm_callback = MyCallBack();
-        ddr4_callback = MyCallBack();
-
+        // Basic memory settings
         hbm_mem = make_shared<MultiChannelMemorySystem>(
             "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
             256 * 16);
         ddr4_mem = make_shared<MultiChannelMemorySystem>(
             "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
             8*1024);
-
-        hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
-        ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
 
         mem_size = (uint64_t)getConfigParam(UINT, "NUM_CHANS") * getConfigParam(UINT, "NUM_RANKS") *
                    getConfigParam(UINT, "NUM_BANK_GROUPS") * getConfigParam(UINT, "NUM_BANKS") *
@@ -146,39 +188,55 @@ class MyPIMFixture : public testing::Test
         basic_stride =
             (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
 
+        // Callback Settings
+        hbm_callback = MyCallBack();
+        ddr4_callback = MyCallBack();
+        hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
+        ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
+
+        // PIM settings
         int numPIMChan = 64;
         int numPIMRank = 1;
-        vec_size_in_byte = 64;
-
         kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
         ktype = KernelType::EMB;
 
-        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/pim_trace.txt");        
+        // DLRM settings
+        vec_size_in_byte = 64;
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/trace.txt");
+
+        // Overall cycle
+        cur_cycle = 0;
     }
-    void executePIMPerQemb(int pooling_idx, int ch_idx, int ra_idx, int bg_idx, int bank_idx, int row_idx, int col_idx)
+
+    uint64_t executePIMPerQemb(int pooling_idx, int ch_idx, int ra_idx, int bg_idx, int bank_idx, int row_idx, int col_idx)
     {
         int input_row = row_idx;
         int result_row = 256;
-        kernel->executeEltwise(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, bank_idx, input_row, result_row);
-        uint64_t addr = kernel->readPIMResult(ch_idx, ra_idx, bg_idx, bank_idx, row_idx, col_idx); //TODO : put parameters
 
-        HBM_read_addrs.push_back(addr);
+        // perform q + r addition
+        // put RD transaction to read the result
+        kernel->executeEltwise(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, bank_idx, input_row, result_row);
+        uint64_t addr = kernel->readPIMResult(ch_idx, ra_idx, bg_idx, bank_idx, row_idx, col_idx);
+
+        return addr;
     }
 
-    int addTransactionPerPooling(int pooling_idx, bool is_write, BurstType bst)
+    void addTransactionPerPooling(int pooling_idx, bool is_write, BurstType bst)
     {
         for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
         {
             uint64_t addr = HBM_transaction[pooling_idx][j];
-            unsigned chan, rank, bank, row, col;
-            kernel->getChanRankBankgroupAddress(addr, chan, rank, bank, row, col);
-            executePIMPerQemb(pooling_idx, chan, rank);
-            // assume r vector is fetched from SRF
+            unsigned chan, rank, bg, bank, row, col;
+            kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+            uint64_t rd_addr = executePIMPerQemb(pooling_idx, chan, rank, bg, bank, row, col);
+            hbm_callback.register_read_addr(rd_addr);
+            // cout << "registered addr : " << rd_addr << endl;
         }
 
         for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
         {
             ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k], &bst);
+            ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
         }
     }
 
@@ -199,6 +257,8 @@ class MyPIMFixture : public testing::Test
             int nmp_cycle_left = add_cycle;
             int buffer_queue = 0;
             int nmp_cycle = 0;
+            int hbm_complete = HBM_transaction[i].size();
+            int dimm_complete = DIMM_transaction[i].size();
 
             addTransactionPerPooling(i, is_write, nullBst);
             while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
@@ -226,38 +286,38 @@ class MyPIMFixture : public testing::Test
                     nmp_cycle_left = add_cycle;
                 }
 
-
-                for (int i=0; i < hbm_callback.complete_addr.size();i++)
+                for(int i=0; i<hbm_callback.complete_addr_count; i++)
                 {
-                    cout << "HBM " << hbm_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
-                    
-                    for(int j=0; j< HBM_read_addrs.size(); j++)
-                    {
-                        if(hbm_callback.complete_addr[i] == HBM_read_addrs[j])
-                        {
-                            pooling_count--; // r vector is added inside executePIMPerQemb
-                            if(is_calculating)
-                                buffer_queue++;
-                            else
-                                is_calculating = true;
-                                nmp_cycle_left = add_cycle;
-                        }
-                    }
-                }
-                for (int i=0; i<ddr4_callback.complete_addr.size();i++)
-                {
-                    cout << "DIMM " << ddr4_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
-
                     pooling_count--;
                     if(is_calculating)
                         buffer_queue++;
                     else
+                    {
                         is_calculating = true;
                         nmp_cycle_left = add_cycle;
+                    }
+
+                    cout << "HBM " << hbm_callback.complete_channel[i] << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    hbm_complete--;
                 }
 
-                hbm_callback.complete_addr.clear();
-                ddr4_callback.complete_addr.clear();
+                for (int i=0; i<ddr4_callback.complete_addr_count; i++)
+                {
+                    pooling_count--;
+                    if(is_calculating)
+                        buffer_queue++;
+                    else
+                    {
+                        is_calculating = true;
+                        nmp_cycle_left = add_cycle;
+                    }
+
+                    cout << "DIMM " << ddr4_callback.complete_channel[i] << " "  << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    dimm_complete--;
+                }
+                hbm_callback.complete_addr_check_complete();
+                ddr4_callback.complete_addr_check_complete();
+//                cout << "hbm, dimm complete : " << hbm_complete << " " << dimm_complete << endl;
             }
         }
     }
@@ -269,12 +329,13 @@ class MyPIMFixture : public testing::Test
         std::stringstream ss;
         int count = 0;
 
-        std::vector<uint64_t> inner1;
-        std::vector<uint64_t> inner2;
-        HBM_transaction.push_back(inner1);
-        DIMM_transaction.push_back(inner2);
+        std::vector<uint64_t> HBM_pooling;
+        std::vector<uint64_t> DIMM_pooling;
+        HBM_transaction.push_back(HBM_pooling);
+        DIMM_transaction.push_back(DIMM_pooling);
         HBM_transaction[count].clear();
         DIMM_transaction[count].clear();
+
         cout << filename << endl;
 
         if(file.is_open())
@@ -284,10 +345,10 @@ class MyPIMFixture : public testing::Test
                 if(line.empty())
                 {
                     count++;
-                    std::vector<uint64_t> inner1;
-                    std::vector<uint64_t> inner2;
-                    HBM_transaction.push_back(inner1);
-                    DIMM_transaction.push_back(inner2);
+                    std::vector<uint64_t> HBM_pooling;
+                    std::vector<uint64_t> DIMM_pooling;
+                    HBM_transaction.push_back(HBM_pooling);
+                    DIMM_transaction.push_back(DIMM_pooling);
                     HBM_transaction[count].clear();
                     DIMM_transaction[count].clear();
                     continue;
@@ -322,7 +383,8 @@ class MyPIMFixture : public testing::Test
             }
 
         }
-           
+
+        cout << "Done loading trace file" << endl;
     }
 
         
@@ -343,7 +405,6 @@ class MyPIMFixture : public testing::Test
 
         vector <vector<uint64_t>> HBM_transaction;
         vector <vector<uint64_t>> DIMM_transaction;
-        vector <uint64_t> HBM_read_addrs;
 
 };
 

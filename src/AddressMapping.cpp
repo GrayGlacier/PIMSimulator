@@ -61,14 +61,14 @@ AddrMapping::AddrMapping()
     num_bank_per_bg_ = getConfigParam(UINT, "NUM_BANKS") / getConfigParam(UINT, "NUM_BANK_GROUPS");
     addressMappingScheme = PIMConfiguration::getAddressMappingScheme();
 
-    cout << "rankBitWidth : " << rankBitWidth << endl;
-    cout << "rowBitwidth : " << rowBitWidth << endl;
-    cout << "colHighBitWidth :" << colHighBitWidth << endl;
-    cout << "channelBitWidth : " << channelBitWidth << endl;
-    cout << "bankBitWidth : " << bankBitWidth << endl;
-    cout << "bankgroupBitWidth : " << bankgroupBitWidth << endl;
-    cout << "colLowBitWidth :" << colHighBitWidth << endl;
-    cout << "byteOffsetWidth : " << byteOffsetWidth << endl;
+    // cout << "rankBitWidth : " << rankBitWidth << endl;
+    // cout << "rowBitwidth : " << rowBitWidth << endl;
+    // cout << "colHighBitWidth :" << colHighBitWidth << endl;
+    // cout << "channelBitWidth : " << channelBitWidth << endl;
+    // cout << "bankBitWidth : " << bankBitWidth << endl;
+    // cout << "bankgroupBitWidth : " << bankgroupBitWidth << endl;
+    // cout << "colLowBitWidth :" << colHighBitWidth << endl;
+    // cout << "byteOffsetWidth : " << byteOffsetWidth << endl;
 
 }
 

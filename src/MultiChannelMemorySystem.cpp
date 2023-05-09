@@ -459,6 +459,7 @@ bool MultiChannelMemorySystem::addTransaction(bool isWrite, uint64_t addr, Burst
 {
     unsigned channelNumber = findChannelNumber(addr);
     uint64_t c_addr = changeRA12RA13(addr);
+
     return channels[channelNumber]->addTransaction(isWrite, c_addr, data);
 }
 
