@@ -109,21 +109,12 @@ class MyCallBack : public TransactionCompleteCB
         {
             channel = id;
             vector<int> erase_queue;
-            if(addr == 7569187264)
-                cout << "target addr found, cycle : " << cycle << endl;
+
 
             for(int i=0; i<read_addr_list.size(); i++)
             {
-//                if(addr == 7569187264)
-//                    cout << "target addr found, cycle : " << cycle << endl;
-
-//                if(read_addr_list[i] == 7569187264)
-//                    cout << "addr found at : " << i << ", cycle : " << cycle << endl;
-
                 if(addr == read_addr_list[i])
                 {
-                    // cout << read_addr_list.size() << endl;
-                    // cout << "read addr : "<< addr << endl;
                     complete_channel.push_back(id);
                     complete_addr.push_back(addr);
                     erase_queue.push_back(i);
@@ -135,13 +126,10 @@ class MyCallBack : public TransactionCompleteCB
             int erase_count = 0;
             for(int i=0; i<erase_queue.size(); i++)
             {
-                // cout << "erase addr : " << read_addr_list[erase_queue[i] - erase_count] << " " << erase_count << endl;
                 read_addr_list.erase(read_addr_list.begin() + erase_queue[i] - erase_count);
                 erase_count++;
             }
 
-            if (read_addr_list.size() == 0)
-                cout << read_addr_list.size() << " " << cycle << endl;
         }
 
         void register_read_addr(uint64_t addr)
@@ -175,7 +163,7 @@ class MyPIMFixture : public testing::Test
     {
         // Basic memory settings
         hbm_mem = make_shared<MultiChannelMemorySystem>(
-            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_64ch.ini", ".", "example_app",
+            "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_16ch.ini", ".", "example_app",
             256 * 16);
         ddr4_mem = make_shared<MultiChannelMemorySystem>(
             "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
@@ -199,10 +187,11 @@ class MyPIMFixture : public testing::Test
         int numPIMRank = 1;
         kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
         ktype = KernelType::EMB;
+        total_banks = getConfigParam(UINT, "NUM_BANKS");
 
         // DLRM settings
         vec_size_in_byte = 64;
-        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/trace.txt");
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/random_trace_col_4.txt");
 
         // Overall cycle
         cur_cycle = 0;
@@ -230,14 +219,97 @@ class MyPIMFixture : public testing::Test
             kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
             uint64_t rd_addr = executePIMPerQemb(pooling_idx, chan, rank, bg, bank, row, col);
             hbm_callback.register_read_addr(rd_addr);
-            // cout << "registered addr : " << rd_addr << endl;
         }
 
         for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
         {
-            ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k], &bst);
+            ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k]);
             ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
         }
+    }
+
+    uint64_t executePIMMultipleQembs(int pooling_idx, int ch_idx, int ra_idx, int bg_idx, int bank_idx, vector<int> row_idx, int col_idx, int num_q_embs)
+    {
+        int result_row = 256;
+        kernel->executeEltwiseMultipleQs(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, bank_idx, num_q_embs, row_idx, result_row);
+        uint64_t addr = kernel->readPIMResult(ch_idx, ra_idx, bg_idx, bank_idx, result_row, col_idx);
+
+        return addr;
+    }
+
+    int determineQembsPerBank(int pooling_idx)
+    {
+        int total_used_banks = 0;
+        
+        qembs_per_bank.clear();
+        qembs_addrs.clear();
+        for(int i=0; i<total_banks; i++)
+        {
+            qembs_per_bank.push_back(0);
+            std::vector<uint64_t> dummy;
+            qembs_addrs.push_back(dummy);
+        }
+
+        for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
+        {
+            uint64_t addr = HBM_transaction[pooling_idx][j];
+            unsigned chan, rank, bg, bank, row, col;
+            kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+            qembs_per_bank[bank] = qembs_per_bank[bank] + 1;
+            qembs_addrs[bank].push_back(addr);
+        }
+
+        for(int i=0; i<total_banks; i++)
+        {
+            if(qembs_addrs[i].size() > 1)
+                total_used_banks++;
+        }
+
+        return total_used_banks;
+
+        /////////////// verify the results ///////////////
+        /*
+        int total_q = 0;
+        cout << "pooling idx : " << pooling_idx << " total q's " << HBM_transaction[pooling_idx].size() << endl;
+        for(int i=0; i<total_banks; i++)
+        {
+            total_q += qembs_addrs[i].size();
+            cout << "bank " << i << " " << qembs_addrs[i].size() << endl;
+        }
+        cout << "total q : " << total_q << endl;
+
+        if(i == 5)
+            exit(0);
+        */
+    }
+
+    int addTransactionPerPoolingMultipleQembs(int pooling_idx, bool is_write)
+    {
+        int total_used_banks = determineQembsPerBank(pooling_idx);
+        for(int j=0;j<total_banks;j++)
+        {   
+            uint64_t rd_addr;
+            vector<int> input_rows;
+            unsigned chan, rank, bg, bank, row, col;
+
+            for(int l=0; l<qembs_addrs[j].size(); l++)
+            {
+                uint64_t addr = qembs_addrs[j][l];
+                kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+                input_rows.push_back(row);
+            }
+
+            rd_addr = executePIMMultipleQembs(pooling_idx, chan, rank, bg, bank, input_rows, col, qembs_addrs[j].size());
+            hbm_callback.register_read_addr(rd_addr);
+        }
+
+        for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
+        {
+            ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k]);
+            ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
+        }
+
+        return total_used_banks;
     }
 
     void executeNMP()
@@ -252,7 +324,9 @@ class MyPIMFixture : public testing::Test
 
         for(int i=0; i<total_embedding; i++)
         {
-            int pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
+            cout << "processing " << i << " out of " << total_embedding << endl;
+            int total_used_banks_in_HBM = addTransactionPerPoolingMultipleQembs(i, is_write);
+            int pooling_count = total_used_banks_in_HBM + DIMM_transaction[i].size();
             bool is_calculating = false;
             int nmp_cycle_left = add_cycle;
             int buffer_queue = 0;
@@ -260,11 +334,12 @@ class MyPIMFixture : public testing::Test
             int hbm_complete = HBM_transaction[i].size();
             int dimm_complete = DIMM_transaction[i].size();
 
-            addTransactionPerPooling(i, is_write, nullBst);
+            // addTransactionPerPooling(i, is_write, nullBst);
             while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
             {   
                 nmp_cycle++;
                 hbm_mem->update();
+                cur_cycle++;
                 ddr4_count++;
                 if (ddr4_count == ddr4_clk/hbm_clk)
                 {
@@ -297,7 +372,7 @@ class MyPIMFixture : public testing::Test
                         nmp_cycle_left = add_cycle;
                     }
 
-                    cout << "HBM " << hbm_callback.complete_channel[i] << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    // cout << "HBM " << hbm_callback.complete_channel[i] << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
                     hbm_complete--;
                 }
 
@@ -312,14 +387,15 @@ class MyPIMFixture : public testing::Test
                         nmp_cycle_left = add_cycle;
                     }
 
-                    cout << "DIMM " << ddr4_callback.complete_channel[i] << " "  << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    // cout << "DIMM " << ddr4_callback.complete_channel[i] << " "  << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
                     dimm_complete--;
                 }
                 hbm_callback.complete_addr_check_complete();
                 ddr4_callback.complete_addr_check_complete();
-//                cout << "hbm, dimm complete : " << hbm_complete << " " << dimm_complete << endl;
             }
         }
+
+        cout << "total cycle : " << cur_cycle << endl;
     }
 
     void getMemTraffic(string filename)
@@ -405,6 +481,9 @@ class MyPIMFixture : public testing::Test
 
         vector <vector<uint64_t>> HBM_transaction;
         vector <vector<uint64_t>> DIMM_transaction;
+        vector<int> qembs_per_bank;
+        vector<vector<uint64_t>> qembs_addrs;
+        int total_banks;
 
 };
 

@@ -99,6 +99,8 @@ class PIMKernelChannelwise
     void executeGemv(NumpyBurstType* w_data, NumpyBurstType* i_data, bool is_tree);
     void executeEltwise(int dim, pimBankType bank_types, KernelType ktype, int ch_idx, int ra_idx,
                         int bank_idx, int input_row, int result_row);
+    void executeEltwiseMultipleQs(int dim, pimBankType bank_types, KernelType ktype, int ch_idx, int ra_idx,
+                        int bank_idx, int num_q_embs, vector<int> input_row, int result_row);
     void computeGemv(NumpyBurstType* data, int num_input_tiles, int num_output_tile, int input_tile,
                      int output_tile, int batch_idx, pimBankType bank_types);
     void computeEmbOp(int numTile, int ch_idx, int ra_idx, int bank_idx, int input_Row, int result_Row);

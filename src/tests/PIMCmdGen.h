@@ -70,6 +70,66 @@ class BatchNormPIMKernel : public IPIMCmd
 };
 */
 
+class EmbOpPIMKernelMultQ : public IPIMCmd
+{
+    public:
+        EmbOpPIMKernelMultQ(KernelType ktype, int bank_id, int num_q_embs) : IPIMCmd(ktype), bank_id(bank_id), num_q_embs(num_q_embs) {}
+    virtual vector<PIMCmd> generateKernel(int num_jump_to_be_taken,
+                                          int num_jump_to_be_taken_odd_bank = 0,
+                                          int num_jump_to_be_taken_even_bank = 0) override
+    {
+        vector<PIMCmd> pim_cmds;
+        vector<PIMCmd> tmp_cmds;
+        PIMCmdType pimType = getPIMCmdType();
+
+        if(bank_id == 0)
+        {
+            for(int i=0; i<num_q_embs; i++)
+            {
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK));
+//                tmp_cmds.push_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::SRF_A));
+                tmp_cmds.push_back(PIMCmd(pimType, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK, 1));
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::NOP, 7));
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::NOP, 0));
+            }
+        }
+        else
+        {
+            for(int i=0; i<num_q_embs; i++)
+            {
+            
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_B, PIMOpdType::ODD_BANK));
+//                tmp_cmds.push_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_B, PIMOpdType::SRF_A));
+                tmp_cmds.push_back(PIMCmd(pimType, PIMOpdType::GRF_B, PIMOpdType::GRF_B, PIMOpdType::ODD_BANK, 1));
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::NOP, 7));
+                tmp_cmds.push_back(PIMCmd(PIMCmdType::NOP, 0));
+
+            }
+
+        }
+        pim_cmds.assign(tmp_cmds.begin(), tmp_cmds.end());
+        if (num_jump_to_be_taken != 0)
+        {
+            pim_cmds.push_back(PIMCmd(PIMCmdType::JUMP, num_jump_to_be_taken, pim_cmds.size() + 1));
+        }
+        pim_cmds.push_back(PIMCmd(PIMCmdType::EXIT, 0));
+        return pim_cmds;
+    }
+
+  private:
+    PIMCmdType getPIMCmdType()
+    {
+        if (kernelType == KernelType::ADD)
+            return PIMCmdType::ADD;
+        else if (kernelType == KernelType::EMB)
+            return PIMCmdType::ADD;
+        else
+            throw invalid_argument("Not supported element-wise operation");
+    }
+    int bank_id;
+    int num_q_embs;
+};
+
 class EmbOpPIMKernel : public IPIMCmd
 {
     public:
@@ -84,20 +144,23 @@ class EmbOpPIMKernel : public IPIMCmd
 
         if(bank_id == 0)
         {
-            tmp_cmds = {
+            tmp_cmds = 
+            {
                 PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::SRF_A),
                 PIMCmd(pimType, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK, 1),
                 PIMCmd(PIMCmdType::NOP, 7),
-                PIMCmd(PIMCmdType::NOP, 0),
+                PIMCmd(PIMCmdType::NOP, 0)
             };
+
         }
         else
         {
-            tmp_cmds = {
+            tmp_cmds = 
+            {
                 PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_B, PIMOpdType::SRF_A),
                 PIMCmd(pimType, PIMOpdType::GRF_B, PIMOpdType::GRF_B, PIMOpdType::ODD_BANK, 1),
                 PIMCmd(PIMCmdType::NOP, 7),
-                PIMCmd(PIMCmdType::NOP, 0),
+                PIMCmd(PIMCmdType::NOP, 0)                
             };
 
         }
@@ -256,6 +319,11 @@ class PIMCmdGen
     static vector<PIMCmd> getPIMCmds(KernelType ktype, int bank_id, int num_jump_to_be_taken,
                                      int num_jump_to_be_taken_odd_bank,
                                      int num_jump_to_be_taken_even_bank);
+    static vector<PIMCmd> getPIMCmds(KernelType ktype, int bank_id, int num_q_embs,
+                                    int num_jump_to_be_taken,
+                                     int num_jump_to_be_taken_odd_bank,
+                                     int num_jump_to_be_taken_even_bank);
+
 };
 
 #endif  // __PIM_KERNEL_GEN_H__

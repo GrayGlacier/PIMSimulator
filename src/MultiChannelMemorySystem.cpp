@@ -455,6 +455,13 @@ bool MultiChannelMemorySystem::addBarrier(int chanId)
     return channels[chanId]->addBarrier();
 }
 
+bool MultiChannelMemorySystem::addTransaction(bool isWrite, uint64_t addr)
+{
+    BurstType nullBst;
+    unsigned channelNumber = findChannelNumber(addr);
+    return channels[channelNumber]->addTransaction(isWrite, addr, &nullBst);
+}
+
 bool MultiChannelMemorySystem::addTransaction(bool isWrite, uint64_t addr, BurstType* data)
 {
     unsigned channelNumber = findChannelNumber(addr);

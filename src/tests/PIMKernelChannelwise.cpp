@@ -375,6 +375,55 @@ void PIMKernelChannelwise::executeEltwise(int dim, pimBankType pb_type, KernelTy
     parkOut(ch_idx, ra_idx);
 }
 
+void PIMKernelChannelwise::executeEltwiseMultipleQs(int dim, pimBankType pb_type, KernelType ktype, int ch_idx, int ra_idx,
+                                 int bank_idx, int num_q_embs, vector<int> input_row, int result_row)
+{
+    // TODO : num_jump_to_be_taken??
+    // how many num_tiles are needed? (dim / num_grf ?? -> dim : byte, num_grf : byte (fp 16) -> how many bytes?)
+    // need to consider dim with burst byte and precision byte
+    int num_tile = 8;
+    int num_jump_to_be_taken = num_tile - 1;
+    vector<PIMCmd> pim_cmds = PIMCmdGen::getPIMCmds(ktype, bank_idx, num_q_embs, num_jump_to_be_taken, 0, 0);
+
+    int crf_toggle_cond = -1;
+    // set Toggle Condition
+    switch (pb_type)
+    {
+        case pimBankType::EVEN_BANK:
+            crf_toggle_cond = 2;
+            break;
+        case pimBankType::ODD_BANK:
+            crf_toggle_cond = 1;
+            break;
+        case pimBankType::ALL_BANK:
+            crf_toggle_cond = 0;
+            break;
+        default:
+            crf_toggle_cond = -1;
+            break;
+    }
+
+    setCrf(&bst_hab_pim_, true, use_all_grf_, crf_toggle_cond, false, false);
+    setCrf(&bst_hab_, false, use_all_grf_, crf_toggle_cond, false, false);
+
+    parkIn(ch_idx, ra_idx);
+    changePIMMode(dramMode::SB, dramMode::HAB, ch_idx, ra_idx);
+    programCrf(pim_cmds, ch_idx, ra_idx);
+    changePIMMode(dramMode::HAB, dramMode::HAB_PIM, ch_idx, ra_idx);
+
+    if (ktype == KernelType::EMB)
+    {
+        for(int i=0; i<input_row.size(); i++)
+        {
+            computeEmbOp(num_tile, ch_idx, ra_idx, bank_idx, input_row[i], result_row);
+        }
+    }
+
+    changePIMMode(dramMode::HAB_PIM, dramMode::HAB, ch_idx, ra_idx);
+    changePIMMode(dramMode::HAB, dramMode::SB, ch_idx, ra_idx);
+    parkOut(ch_idx, ra_idx);
+}
+
 void PIMKernelChannelwise::computeEmbOp(int num_tile, int ch_idx, int ra_idx, int bank_idx, int input_row, int result_row)
 {
 

@@ -54,6 +54,7 @@ class MultiChannelMemorySystem : public MemoryObject
     virtual ~MultiChannelMemorySystem();
 
     virtual bool addTransaction(Transaction* trans);
+    virtual bool addTransaction(bool isWrite, uint64_t addr);
     virtual bool addTransaction(bool isWrite, uint64_t addr, BurstType* data);
     virtual bool addTransaction(bool isWrite, uint64_t addr, const std::string& tag,
                                 BurstType* data);

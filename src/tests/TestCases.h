@@ -70,7 +70,7 @@ class HeterogenousMemoryFixture: public testing::Test
         basic_stride =
             (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
 
-        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/trace.txt");
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/random_trace_col_4.txt");
 
     }
 
@@ -86,10 +86,11 @@ class HeterogenousMemoryFixture: public testing::Test
             void operator()(unsigned id, uint64_t addr, uint64_t cycle)
             {
                 channel = id;
-                complete_addr.push_back(addr);
+                complete_cycle = cycle;
                 if (complete_cycle != cycle)
                     complete_addr.clear();
 
+                complete_addr.push_back(addr);
             }
 
             int channel;
@@ -121,6 +122,9 @@ class HeterogenousMemoryFixture: public testing::Test
 
         for(int i=0; i<total_embedding; i++)
         {
+
+            cout << "processing " << i << " out of " << total_embedding << endl;
+
             int pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
             bool is_calculating = false;
             int nmp_cycle_left = add_cycle;
@@ -132,6 +136,7 @@ class HeterogenousMemoryFixture: public testing::Test
             {   
                 nmp_cycle++;
                 hbm_mem->update();
+                cur_cycle++;
                 ddr4_count++;
                 if (ddr4_count == ddr4_clk/hbm_clk)
                 {
@@ -156,7 +161,7 @@ class HeterogenousMemoryFixture: public testing::Test
 
                 for (int i=0; i<hbm_callback.complete_addr.size();i++)
                 {
-                    cout << "HBM " << hbm_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    // cout << "HBM " << hbm_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
 
                     pooling_count--;
                     if(is_calculating)
@@ -167,7 +172,7 @@ class HeterogenousMemoryFixture: public testing::Test
                 }
                 for (int i=0; i<ddr4_callback.complete_addr.size();i++)
                 {
-                    cout << "DIMM " << ddr4_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
+                    // cout << "DIMM " << ddr4_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;
 
                     pooling_count--;
                     if(is_calculating)
@@ -181,13 +186,12 @@ class HeterogenousMemoryFixture: public testing::Test
                 ddr4_callback.complete_addr.clear();
             }
         }
+        cout << "total cycle : " << cur_cycle << endl;
 
-        cout << cur_cycle << endl;
     }
 
     void getMemTraffic(string filename)
     {
-        cout << "generating transactions" << endl;
         string line, str_tmp;
         std::ifstream file(filename);
         std::stringstream ss;
@@ -199,6 +203,7 @@ class HeterogenousMemoryFixture: public testing::Test
         DIMM_transaction.push_back(DIMM_pooling);
         HBM_transaction[count].clear();
         DIMM_transaction[count].clear();
+
         cout << filename << endl;
 
         if(file.is_open())
@@ -246,7 +251,8 @@ class HeterogenousMemoryFixture: public testing::Test
             }
 
         }
-           
+
+        cout << "Done loading trace file" << endl;
     }
 
     void generateDummyMemTraffic(bool is_write)
