@@ -20,6 +20,10 @@
 
 using namespace DRAMSim;
 
+
+#include <chrono>
+using namespace std::chrono;
+
 // A predicate-formatter for asserting that two integers are mutually prime.
 ::testing::AssertionResult fp16EqualHelper(const char* m_expr, const char* n_expr, fp16 m, fp16 n);
 ::testing::AssertionResult fp16BstEqualHelper(const char* m_expr, const char* n_expr,
@@ -100,35 +104,44 @@ class MyCallBack : public TransactionCompleteCB
     public:
         MyCallBack()
         {
-            channel = 0;
             complete_addr_count = 0;
             complete_cycle = 0;
+            erase_queue.clear();
         }
 
         void operator()(unsigned id, uint64_t addr, uint64_t cycle)
         {
-            channel = id;
-            vector<int> erase_queue;
-
-
             for(int i=0; i<read_addr_list.size(); i++)
             {
                 if(addr == read_addr_list[i])
                 {
-                    complete_channel.push_back(id);
-                    complete_addr.push_back(addr);
-                    erase_queue.push_back(i);
-                    complete_addr_count++;
-                    complete_cycle = cycle;
+                    bool duplicate = false;
+                    for(int j=0; j<erase_queue.size(); j++)
+                    {
+                        if(addr == erase_queue[j])
+                        {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if(!duplicate)
+                    {
+                        complete_channel.push_back(id);
+                        complete_addr.push_back(addr);
+                        erase_queue.push_back(i);
+                        complete_addr_count++;
+                        complete_cycle = cycle;
+                        // cout << "callback address : " << addr << endl;
+                    }
                 }                       
             }
 
-            int erase_count = 0;
-            for(int i=0; i<erase_queue.size(); i++)
-            {
-                read_addr_list.erase(read_addr_list.begin() + erase_queue[i] - erase_count);
-                erase_count++;
-            }
+            // int erase_count = 0;
+            // for(int i=0; i<erase_queue.size(); i++)
+            // {
+            //     read_addr_list.erase(read_addr_list.begin() + erase_queue[i] - erase_count);
+            //     erase_count++;
+            // }
 
         }
 
@@ -142,9 +155,9 @@ class MyCallBack : public TransactionCompleteCB
             complete_addr.clear();
             complete_channel.clear();
             complete_addr_count = 0;
+            erase_queue.clear();
         }
 
-        int channel;
         int complete_addr_count;
         bool scan_complete;
         uint64_t complete_cycle;
@@ -152,6 +165,8 @@ class MyCallBack : public TransactionCompleteCB
         vector<uint64_t> read_addr_list;
         vector<uint64_t> complete_channel;
         vector<uint64_t> complete_addr;
+        vector<int> erase_queue;
+
 };
 
 class MyPIMFixture : public testing::Test
@@ -165,33 +180,29 @@ class MyPIMFixture : public testing::Test
         hbm_mem = make_shared<MultiChannelMemorySystem>(
             "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_16ch.ini", ".", "example_app",
             256 * 16);
+
+        // PIM settings
+        int numPIMChan = 16;
+        int numPIMRank = 1;
+        vec_size_in_byte = 64;
+        kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
+        total_channels = getConfigParam(UINT, "NUM_CHANS");
+        total_banks = getConfigParam(UINT, "NUM_BANKS");
+
         ddr4_mem = make_shared<MultiChannelMemorySystem>(
             "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
             8*1024);
 
-        mem_size = (uint64_t)getConfigParam(UINT, "NUM_CHANS") * getConfigParam(UINT, "NUM_RANKS") *
-                   getConfigParam(UINT, "NUM_BANK_GROUPS") * getConfigParam(UINT, "NUM_BANKS") *
-                   getConfigParam(UINT, "NUM_ROWS") * getConfigParam(UINT, "NUM_COLS");
-
-        basic_stride =
-            (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
 
         // Callback Settings
         hbm_callback = MyCallBack();
         ddr4_callback = MyCallBack();
         hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
         ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
-
-        // PIM settings
-        int numPIMChan = 64;
-        int numPIMRank = 1;
-        kernel = make_shared<PIMKernelChannelwise>(hbm_mem, numPIMChan, numPIMRank);
         ktype = KernelType::EMB;
-        total_banks = getConfigParam(UINT, "NUM_BANKS");
 
         // DLRM settings
-        vec_size_in_byte = 64;
-        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/random_trace_col_4.txt");
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/traces/bg_map_trace_col_4.txt");
 
         // Overall cycle
         cur_cycle = 0;
@@ -210,44 +221,39 @@ class MyPIMFixture : public testing::Test
         return addr;
     }
 
-    void addTransactionPerPooling(int pooling_idx, bool is_write, BurstType bst)
-    {
-        for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
-        {
-            uint64_t addr = HBM_transaction[pooling_idx][j];
-            unsigned chan, rank, bg, bank, row, col;
-            kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
-            uint64_t rd_addr = executePIMPerQemb(pooling_idx, chan, rank, bg, bank, row, col);
-            hbm_callback.register_read_addr(rd_addr);
-        }
-
-        for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
-        {
-            ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k]);
-            ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
-        }
-    }
-
     uint64_t executePIMMultipleQembs(int pooling_idx, int ch_idx, int ra_idx, int bg_idx, int bank_idx, vector<int> row_idx, int col_idx, int num_q_embs)
     {
         int result_row = 256;
         kernel->executeEltwiseMultipleQs(vec_size_in_byte, pimBankType::ALL_BANK, ktype, ch_idx, ra_idx, bank_idx, num_q_embs, row_idx, result_row);
         uint64_t addr = kernel->readPIMResult(ch_idx, ra_idx, bg_idx, bank_idx, result_row, col_idx);
 
+        ///////// For Test ////////////////
+        // cout << "address : " << addr << endl;
+
         return addr;
     }
 
-    int determineQembsPerBank(int pooling_idx)
+    int determineQembsPerBankPerChannel(int pooling_idx)
     {
         int total_used_banks = 0;
         
         qembs_per_bank.clear();
         qembs_addrs.clear();
-        for(int i=0; i<total_banks; i++)
+
+        // initialize vectors
+        for(int i=0; i<total_channels; i++)
         {
-            qembs_per_bank.push_back(0);
-            std::vector<uint64_t> dummy;
-            qembs_addrs.push_back(dummy);
+            std::vector<int> dummy_1;
+            qembs_per_bank.push_back(dummy_1);
+            std::vector<vector<uint64_t>> dummy_2;
+            qembs_addrs.push_back(dummy_2);
+
+            for(int j=0; j<total_banks; j++)
+            {
+                std::vector<uint64_t> dummy_3;
+                qembs_addrs[i].push_back(dummy_3);
+                qembs_per_bank[i].push_back(0);
+            }
         }
 
         for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
@@ -255,56 +261,74 @@ class MyPIMFixture : public testing::Test
             uint64_t addr = HBM_transaction[pooling_idx][j];
             unsigned chan, rank, bg, bank, row, col;
             kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
-            qembs_per_bank[bank] = qembs_per_bank[bank] + 1;
-            qembs_addrs[bank].push_back(addr);
+            qembs_per_bank[chan][bank] = qembs_per_bank[chan][bank] + 1;
+            // cout << "channel : " << chan << " total qs : "<< qembs_per_bank[chan][bank] << endl; 
+            qembs_addrs[chan][bank].push_back(addr);
         }
 
-        for(int i=0; i<total_banks; i++)
+        for(int i=0; i<total_channels; i++)
         {
-            if(qembs_addrs[i].size() > 1)
-                total_used_banks++;
+            for(int j=0; j<total_banks; j++)
+            {
+                if(qembs_per_bank[i][j] > 0)
+                {
+                    //////////////    DEBUG    //////////////
+                    // cout << "channel # : " << i << " bank # : " << j << " vectors : "<< qembs_per_bank[i][j] << endl;
+                    total_used_banks++;
+                }
+            }
         }
 
         return total_used_banks;
-
-        /////////////// verify the results ///////////////
-        /*
-        int total_q = 0;
-        cout << "pooling idx : " << pooling_idx << " total q's " << HBM_transaction[pooling_idx].size() << endl;
-        for(int i=0; i<total_banks; i++)
-        {
-            total_q += qembs_addrs[i].size();
-            cout << "bank " << i << " " << qembs_addrs[i].size() << endl;
-        }
-        cout << "total q : " << total_q << endl;
-
-        if(i == 5)
-            exit(0);
-        */
     }
 
-    int addTransactionPerPoolingMultipleQembs(int pooling_idx, bool is_write)
+    int addTransactionPerPoolingMultipleQembsWithRespectToChannel(int pooling_idx, bool is_write)
     {
-        int total_used_banks = determineQembsPerBank(pooling_idx);
-        for(int j=0;j<total_banks;j++)
-        {   
-            uint64_t rd_addr;
-            vector<int> input_rows;
-            unsigned chan, rank, bg, bank, row, col;
+        int total_used_banks = determineQembsPerBankPerChannel(pooling_idx);
 
-            for(int l=0; l<qembs_addrs[j].size(); l++)
-            {
-                uint64_t addr = qembs_addrs[j][l];
-                kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
-                input_rows.push_back(row);
+        // add transaction with respect to bank
+        for(int i=0;i<total_channels;i++)
+        {
+            for(int j=0;j<total_banks;j++)
+            {   
+                uint64_t rd_addr;
+                vector<int> input_rows;
+                unsigned chan, rank, bg, bank, row, col;
+
+                for(int l=0; l<qembs_addrs[i][j].size(); l++)
+                {
+                    uint64_t addr = qembs_addrs[i][j][l];
+                    kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+                    input_rows.push_back(row); // inputs rows activates PIM blocks
+                    // cout << "PIM input on channel # " << chan << endl;
+                }
+
+                    // rd_addr = executePIMMultipleQembs(pooling_idx, chan, rank, bg, bank, input_rows, col, qembs_addrs[i].size()); // PIM result is stored in rd_addr
+                    // hbm_callback.register_read_addr(rd_addr);
+                    // if(qembs_addrs[i][j].size() == 0)
+                    //     cout << rd_addr << " channel : " << chan << endl;
+                    // else
+                    //     cout << rd_addr << " else channel : " << chan << endl;
+
+                    // cout << "input rows : " << input_rows.size() << " qembs addr size : " << qembs_addrs[i][j].size() << endl;
+                    // // kernel->getChanRankBankgroupAddress(rd_addr, chan, rank, bg, bank, row, col);
+                    // // cout << "PIM result on channel # " << chan << " bank # "<< bank << endl;
+
+                if(qembs_addrs[i][j].size() > 0)
+                {
+                    rd_addr = executePIMMultipleQembs(pooling_idx, chan, rank, bg, bank, input_rows, col, qembs_addrs[i][j].size()); // PIM result is stored in rd_addr
+                    hbm_callback.register_read_addr(rd_addr);
+
+                    // ////////////// For Test ////////////////
+                    // unsigned chan, rank, bg, bank, row, col;
+                    // kernel->getChanRankBankgroupAddress(rd_addr, chan, rank, bg, bank, row, col);
+                    // cout << "PIM result on channel # " << chan << " bank # "<< bank << endl;
+                }
             }
-
-            rd_addr = executePIMMultipleQembs(pooling_idx, chan, rank, bg, bank, input_rows, col, qembs_addrs[j].size());
-            hbm_callback.register_read_addr(rd_addr);
         }
-
         for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
         {
+            // cout << "transaction on DIMM " << k << "th out of " << DIMM_transaction[pooling_idx].size() << "  " << DIMM_transaction[pooling_idx][k] << endl;
             ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k]);
             ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
         }
@@ -322,19 +346,20 @@ class MyPIMFixture : public testing::Test
         int ddr4_clk = 4;
         int ddr4_count = 0;
 
-        for(int i=0; i<total_embedding; i++)
+        for(int i=0; i<100; i++)
         {
+//            if(i%100 == 0)
             cout << "processing " << i << " out of " << total_embedding << endl;
-            int total_used_banks_in_HBM = addTransactionPerPoolingMultipleQembs(i, is_write);
+
+            int total_used_banks_in_HBM = addTransactionPerPoolingMultipleQembsWithRespectToChannel(i, is_write);
             int pooling_count = total_used_banks_in_HBM + DIMM_transaction[i].size();
             bool is_calculating = false;
             int nmp_cycle_left = add_cycle;
             int buffer_queue = 0;
             int nmp_cycle = 0;
-            int hbm_complete = HBM_transaction[i].size();
+            int hbm_complete = total_used_banks_in_HBM;
             int dimm_complete = DIMM_transaction[i].size();
 
-            // addTransactionPerPooling(i, is_write, nullBst);
             while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
             {   
                 nmp_cycle++;
@@ -481,11 +506,128 @@ class MyPIMFixture : public testing::Test
 
         vector <vector<uint64_t>> HBM_transaction;
         vector <vector<uint64_t>> DIMM_transaction;
-        vector<int> qembs_per_bank;
-        vector<vector<uint64_t>> qembs_addrs;
+        vector<vector<int>> qembs_per_bank;
+        vector<vector<vector<uint64_t>>> qembs_addrs;
+        // vector<vector<int>> total_reduced_vecs_per_bank;
+        int total_channels;
         int total_banks;
 
 };
+
+    // int addTransactionPerPoolingMultipleQembs(int pooling_idx, bool is_write)
+    // {
+    //     int total_used_banks = determineQembsPerBank(pooling_idx);
+        
+    //     // TODO : add transaction with respect to channel
+    //     // add transaction with respect to bank
+    //     for(int j=0;j<total_banks;j++)
+    //     {   
+    //         uint64_t rd_addr;
+    //         vector<int> input_rows;
+    //         unsigned chan, rank, bg, bank, row, col;
+
+    //         for(int l=0; l<qembs_addrs[j].size(); l++)
+    //         {
+    //             uint64_t addr = qembs_addrs[j][l];
+    //             kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+    //             input_rows.push_back(row); // inputs rows activates PIM blocks
+    //         }
+
+    //         rd_addr = executePIMMultipleQembs(pooling_idx, chan, rank, bg, bank, input_rows, col, qembs_addrs[j].size()); // PIM result is stored in rd_addr
+    //         hbm_callback.register_read_addr(rd_addr);
+    //     }
+
+    //     for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
+    //     {
+    //         // cout << "transaction on DIMM " << k << "th out of " << DIMM_transaction[pooling_idx].size() << "  " << DIMM_transaction[pooling_idx][k] << endl;
+    //         ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k]);
+    //         ddr4_callback.register_read_addr(DIMM_transaction[pooling_idx][k]);
+    //     }
+    //     return total_used_banks;
+    // }
+
+    // int determineQembsPerBank(int pooling_idx)
+    // {
+    //     int total_used_banks = 0;
+        
+    //     qembs_per_bank.clear();
+    //     qembs_addrs.clear();
+
+    //     for(int i=0; i<total_banks; i++)
+    //     {
+    //         qembs_per_bank.push_back(0);
+    //         std::vector<uint64_t> dummy;
+    //         qembs_addrs.push_back(dummy);
+    //     }
+
+    //     for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
+    //     {
+    //         uint64_t addr = HBM_transaction[pooling_idx][j];
+    //         unsigned chan, rank, bg, bank, row, col;
+    //         kernel->getChanRankBankgroupAddress(addr, chan, rank, bg, bank, row, col);
+    //         qembs_per_bank[bank] = qembs_per_bank[bank] + 1;
+    //         qembs_addrs[bank].push_back(addr);
+    //     }
+
+    //     // check total banks used in this pooling operation
+    //     for(int i=0; i<total_banks; i++)
+    //     {
+    //         if(qembs_addrs[i].size() > 1)
+    //             total_used_banks++;
+    //     }
+
+    // //     /////////////// verify the results ///////////////
+    // //     /*
+    // //     int total_q = 0;
+    // //     cout << "pooling idx : " << pooling_idx << " total q's " << HBM_transaction[pooling_idx].size() << endl;
+    // //     for(int i=0; i<total_banks; i++)
+    // //     {
+    // //         total_q += qembs_addrs[i].size();
+    // //         cout << "bank " << i << " " << qembs_addrs[i].size() << endl;
+    // //     }
+    // //     cout << "total q : " << total_q << endl;
+
+    // //     if(i == 5)
+    // //         exit(0);
+    // //     */
+
+    // //    //////////////////// check reduced vectors ////////////////////
+
+    // //     if(pooling_idx < 100)
+    // //     {
+    // //         cout << "total vecs : " << HBM_transaction[pooling_idx].size() << endl;
+    // //         int total_reduced_vecs = 0;
+    // //         for(int i=0; i<total_banks; i++)
+    // //         {
+    // //                 total_reduced_vecs += qembs_per_bank[i];
+    // //                 if(i%2 == 1)
+    // //                 {
+    // //                     total_reduced_vecs_per_bank[i] = total_reduced_vecs_per_bank[i] + total_reduced_vecs;
+    // //                     total_reduced_vecs = 0;
+    // //                 }
+    // //         }
+
+    // //     }
+    // //     if(pooling_idx == 100)
+    // //     {
+    // //         for(int i=0; i<total_banks; i++)
+    // //         {
+    // //             total_reduced_vecs_per_bank[i] = total_reduced_vecs_per_bank[i] / 100;
+    // //             if(total_reduced_vecs_per_bank[i] % 100 > 50)
+    // //             {
+    // //                 total_reduced_vecs_per_bank[i] = total_reduced_vecs_per_bank[i] + 1;
+    // //             }
+    // //             if(i%2 == 1)
+    // //             {
+    // //                 int total_reduced_vecs_per_pim = total_reduced_vecs_per_bank[i-1] + total_reduced_vecs_per_bank[i];
+    // //                 cout << "total reduced vecs on pim block # " << i/2 << " : " << total_reduced_vecs_per_pim << endl;
+    // //             }
+    // //         }
+    // //     }
+
+
+    //     return total_used_banks;
+    // }
 
 
 class PIMKernelFixture : public testing::Test

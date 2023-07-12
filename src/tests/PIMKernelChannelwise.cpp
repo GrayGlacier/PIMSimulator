@@ -90,9 +90,8 @@ void PIMKernelChannelwise::addTransactionWithRawAddress(bool is_write, uint64_t 
 void PIMKernelChannelwise::getChanRankBankgroupAddress(uint64_t addr, unsigned& chan, unsigned& rank, unsigned& bg,
                                                         unsigned& bank, unsigned& row, unsigned& col)
 {
-    AddrMapping addrmap;
-    addrmap.addressMapping(addr, chan, rank, bank, row, col);
-    bg = addrmap.bankgroupId(bank);
+    addrmap->addressMapping(addr, chan, rank, bank, row, col);
+    bg = addrmap->bankgroupId(bank);
 }
 
 void PIMKernelChannelwise::addTransactionAll(bool is_write, int ch_idx, int ra_idx, int bg_idx, int bank_idx, 

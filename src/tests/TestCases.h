@@ -56,6 +56,11 @@ class HeterogenousMemoryFixture: public testing::Test
         hbm_mem = make_shared<MultiChannelMemorySystem>(
             "ini/HBM2_samsung_2M_16B_x64.ini", "system_hbm_16ch.ini", ".", "example_app",
             256 * 16);
+
+        mem_size = (uint64_t)getConfigParam(UINT, "NUM_CHANS") * getConfigParam(UINT, "NUM_RANKS") *
+                   getConfigParam(UINT, "NUM_BANK_GROUPS") * getConfigParam(UINT, "NUM_BANKS") *
+                   getConfigParam(UINT, "NUM_ROWS") * getConfigParam(UINT, "NUM_COLS");
+
         ddr4_mem = make_shared<MultiChannelMemorySystem>(
             "ini/DDR4_8gb_x8_2666.ini", "system_ddr4_1ch.ini", ".", "example_app",
             8*1024);
@@ -63,14 +68,10 @@ class HeterogenousMemoryFixture: public testing::Test
         hbm_mem->RegisterCallbacks(&hbm_callback, NULL, NULL);
         ddr4_mem->RegisterCallbacks(&ddr4_callback, NULL, NULL);
 
-        mem_size = (uint64_t)getConfigParam(UINT, "NUM_CHANS") * getConfigParam(UINT, "NUM_RANKS") *
-                   getConfigParam(UINT, "NUM_BANK_GROUPS") * getConfigParam(UINT, "NUM_BANKS") *
-                   getConfigParam(UINT, "NUM_ROWS") * getConfigParam(UINT, "NUM_COLS");
-
         basic_stride =
             (getConfigParam(UINT, "JEDEC_DATA_BUS_BITS") * getConfigParam(UINT, "BL") / 8);
 
-        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/random_trace_col_4.txt");
+        getMemTraffic("/home/youngsuk95/PIMSimulator/src/tests/traces/random_trace_no_col.txt");
 
     }
 
@@ -102,10 +103,13 @@ class HeterogenousMemoryFixture: public testing::Test
     {
         for(int j=0;j<HBM_transaction[pooling_idx].size();j++)
         {
+            // cout << "transaction on HBM " << HBM_transaction[pooling_idx][j] << endl;
             hbm_mem->addTransaction(is_write, HBM_transaction[pooling_idx][j], &bst);
         }
+
         for(int k=0;k<DIMM_transaction[pooling_idx].size();k++)
         {
+            // cout << "transaction on DIMM " << k+1 << "th out of " << DIMM_transaction[pooling_idx].size() << "  " << DIMM_transaction[pooling_idx][k] << endl;
             ddr4_mem->addTransaction(is_write, DIMM_transaction[pooling_idx][k], &bst);
         }
     }
@@ -120,12 +124,12 @@ class HeterogenousMemoryFixture: public testing::Test
         int ddr4_clk = 4;
         int ddr4_count = 0;
 
-        for(int i=0; i<total_embedding; i++)
+        for(int i=0; i<100; i++)
         {
+            if(i%100 == 0)
+                cout << "processing " << i << " out of " << total_embedding << endl;
 
-            cout << "processing " << i << " out of " << total_embedding << endl;
-
-            int pooling_count = HBM_transaction[i].size() + DIMM_transaction[i].size();
+            int pooling_count = HBM_transaction[i].size(); // + DIMM_transaction[i].size();
             bool is_calculating = false;
             int nmp_cycle_left = add_cycle;
             int buffer_queue = 0;
@@ -134,10 +138,16 @@ class HeterogenousMemoryFixture: public testing::Test
             addTransactionPerPooling(i, is_write, nullBst);
             while (pooling_count > 0 || buffer_queue > 0 || nmp_cycle_left > 0)
             {   
+                // cout << cur_cycle << endl;
+
+                if(pooling_count == 0 && i == (total_embedding-1))
+                    break;
+
                 nmp_cycle++;
                 hbm_mem->update();
                 cur_cycle++;
                 ddr4_count++;
+
                 if (ddr4_count == ddr4_clk/hbm_clk)
                 {
                     ddr4_mem->update();
@@ -170,6 +180,7 @@ class HeterogenousMemoryFixture: public testing::Test
                         is_calculating = true;
                         nmp_cycle_left = add_cycle;
                 }
+
                 for (int i=0; i<ddr4_callback.complete_addr.size();i++)
                 {
                     // cout << "DIMM " << ddr4_callback.channel << " " << pooling_count << " " << buffer_queue << " " << nmp_cycle_left << " " << " " << nmp_cycle << endl;

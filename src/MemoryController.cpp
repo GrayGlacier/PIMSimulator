@@ -458,6 +458,7 @@ void MemoryController::updateRefresh()
 void MemoryController::update()
 {
     updateBankState();
+
     // check for outgoing command packets and handle countdowns
     if (outgoingCmdPacket != NULL)
     {

@@ -85,6 +85,7 @@ class Rank : public SimulatorObject
     MemoryController* memoryController;
     BusPacket* outgoingDataPacket;
     PIMRank* pimRank;
+    vector<PIMRank*> pimRanks;
     unsigned dataCyclesLeft;
     bool refreshWaiting;
 

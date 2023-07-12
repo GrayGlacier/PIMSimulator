@@ -244,6 +244,7 @@ void MemorySystem::update()
         memoryController->addTransaction(pendingTransactions.front());
         pendingTransactions.pop_front();
     }
+
     memoryController->update();
 
     // simply increments the currentClockCycle field for each object

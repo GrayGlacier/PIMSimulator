@@ -55,6 +55,7 @@ class PIMKernelChannelwise
         for (int i = 0; i < num_pim_ranks_; i++) pim_ranks_.push_back(i);
 
         pim_addr_mgr_ = make_shared<PIMAddrManager>(num_pim_chan, num_pim_rank);
+        addrmap = new AddrMapping();
     }
 
     int transaction_size_;
@@ -122,6 +123,7 @@ class PIMKernelChannelwise
     vector<int> pim_chans_;
     vector<int> pim_ranks_;
     PIMMode mode_;
+    AddrMapping* addrmap;
     shared_ptr<MultiChannelMemorySystem> mem_;
 };
 

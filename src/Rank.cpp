@@ -56,8 +56,21 @@ Rank::Rank(ostream& simLog, Configuration& configuration)
     currentClockCycle = 0;
     abmr1Even_ = abmr1Odd_ = abmr2Even_ = abmr2Odd_ = sbmr1_ = sbmr2_ = false;
 
-    pimRank = new PIMRank(dramsimLog, config);
-    pimRank->attachRank(this);
+    if(getConfigParam(UINT, "SB_MODE"))
+    {
+        for(int i=0; i< getConfigParam(UINT, "NUM_PIM_BLOCKS"); i++)
+        {
+            PIMRank* pimRank_tmp = new PIMRank(dramsimLog, config);
+            pimRank_tmp->attachRank(this);
+            pimRanks.push_back(pimRank_tmp);
+        }
+
+    }
+    else
+    {
+        pimRank = new PIMRank(dramsimLog, config);
+        pimRank->attachRank(this);
+    }
 }
 
 void Rank::setChanId(int id)
@@ -110,6 +123,7 @@ void Rank::receiveFromBus(BusPacket* packet)
         check(packet);
         updateState(packet);
     }
+
     execute(packet);
 }
 
@@ -338,7 +352,7 @@ void Rank::readSb(BusPacket* packet)
     }
 
 #ifndef NO_STORAGE
-    if (packet->row == 0x3fff)
+    if (packet->row == 0x3fff && getConfigParam(UINT, "NUM_PIM_BLOCKS") != 0)
     {
         if (0x08 <= packet->column && packet->column <= 0x0f)
             *(packet->data) = pimRank->pimBlocks[packet->bank / 2].grfA[packet->column - 0x8];
